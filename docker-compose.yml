@@ -23,6 +23,13 @@ services:
     volumes:
       - es_data:/usr/share/elasticsearch/data
 
+  # --- Redis ---
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
   # --- Message Broker ---
   rabbitmq:
     image: rabbitmq:3-management
@@ -54,3 +61,4 @@ services:
 volumes:
   mongo_data:
   es_data:
+  redis_data:
