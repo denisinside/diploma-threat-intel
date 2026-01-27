@@ -121,3 +121,5 @@ dmypy.json
 .idea
 
 .cursor
+
+advisory_db/
