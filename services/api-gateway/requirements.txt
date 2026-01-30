@@ -1,0 +1,11 @@
+fastapi
+motor
+elasticsearch[async]==8.11.1
+loguru
+uvicorn[standard]
+pydantic
+pydantic-settings
+aio-pika
+python-jose[cryptography]
+passlib[bcrypt]
+python-dotenv
