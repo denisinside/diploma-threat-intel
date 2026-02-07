@@ -35,3 +35,9 @@ class ChannelType(str, Enum):
 class SubscriptionType(str, Enum):
     VULNERABILITY = "vulnerability"
     LEAK = "leak"
+
+class SubscriptionPlan(str, Enum):
+    FREE = "free"
+    BASIC = "basic"
+    PRO = "pro"
+    ENTERPRISE = "enterprise"
