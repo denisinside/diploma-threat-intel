@@ -7,9 +7,15 @@ sys.path.insert(0, PROJECT_ROOT)
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from core.config import settings
-from database.mongo import init_mongodb
+from database.mongo import init_mongodb, ensure_indexes
 from database.elastic import init_elasticsearch, close_elasticsearch
 from api.v1.vulns_router import router as vulns_router
+from api.v1.assets_router import router as assets_router
+from api.v1.subscriptions_router import router as subscriptions_router
+from api.v1.tickets_router import router as tickets_router
+from api.v1.auth_router import router as auth_router
+from api.v1.leaks_router import router as leaks_router
+from api.v1.tasks_router import router as tasks_router
 
 
 @asynccontextmanager
@@ -19,12 +25,19 @@ async def lifespan(app: FastAPI):
         settings.MONGODB_DB_NAME,
     )
     app.elasticsearch = init_elasticsearch(settings.ELASTICSEARCH_HOSTS)
+    await ensure_indexes(app.mongodb)
     yield
     app.mongodb_client.close()
     await close_elasticsearch(app.elasticsearch)
 
 app = FastAPI(lifespan=lifespan)
+app.include_router(auth_router)
 app.include_router(vulns_router)
+app.include_router(leaks_router)
+app.include_router(assets_router)
+app.include_router(subscriptions_router)
+app.include_router(tickets_router)
+app.include_router(tasks_router)
 
 
 @app.get("/")

@@ -1,0 +1,68 @@
+from fastapi import APIRouter, Request, HTTPException, Query, Depends
+from models.responses.common import MessageResponse
+import services.leaks_service as leaks_service
+from api.v1.dependencies import PaginationParams
+from typing import List, Optional
+
+router = APIRouter(prefix="/leaks", tags=["leaks"])
+
+
+# --- Leak Sources (MongoDB) ---
+
+@router.post("/sources")
+async def create_source(body: dict, request: Request) -> dict:
+    db = request.app.mongodb
+    return await leaks_service.create_source(db, body)
+
+
+@router.get("/sources")
+async def get_all_sources(
+    request: Request,
+    pg: PaginationParams = Depends(PaginationParams),
+) -> List[dict]:
+    db = request.app.mongodb
+    return await leaks_service.get_all_sources(db, skip=pg.skip, limit=pg.limit)
+
+
+@router.get("/sources/{source_id}")
+async def get_source(source_id: str, request: Request) -> dict:
+    db = request.app.mongodb
+    return await leaks_service.get_source(db, source_id)
+
+
+@router.delete("/sources/{source_id}")
+async def delete_source(source_id: str, request: Request) -> MessageResponse:
+    db = request.app.mongodb
+    await leaks_service.delete_source(db, source_id)
+    return MessageResponse(message="Leak source deleted successfully")
+
+
+# --- Leak Records search (Elasticsearch) ---
+
+@router.get("/search")
+async def search_leaks(
+    request: Request,
+    q: Optional[str] = Query(None, min_length=2, description="Full-text search"),
+    domain: Optional[str] = Query(None, description="Search by domain (e.g. 'company.com')"),
+    email: Optional[str] = Query(None, description="Search by exact email"),
+    email_pattern: Optional[str] = Query(None, description="Wildcard search (e.g. '*@company.com')"),
+    pg: PaginationParams = Depends(PaginationParams),
+) -> List[dict]:
+    """Search leaked records via Elasticsearch"""
+    es = request.app.elasticsearch
+
+    if email:
+        return await leaks_service.search_by_email(es, email, size=pg.limit, skip=pg.skip)
+    elif domain:
+        return await leaks_service.search_by_domain(es, domain, size=pg.limit, skip=pg.skip)
+    elif email_pattern:
+        return await leaks_service.search_by_email_pattern(
+            es, email_pattern, size=pg.limit, skip=pg.skip,
+        )
+    elif q:
+        return await leaks_service.search_fulltext(es, q, size=pg.limit, skip=pg.skip)
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide at least one search parameter: q, domain, email, or email_pattern",
+        )
