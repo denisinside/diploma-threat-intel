@@ -41,3 +41,12 @@ class SubscriptionPlan(str, Enum):
     BASIC = "basic"
     PRO = "pro"
     ENTERPRISE = "enterprise"
+
+
+class LeakType(str, Enum):
+    """Type of leak: url, stealer, combo, breach, other"""
+    URL = "url"
+    STEALER = "stealer"
+    COMBO = "combo"
+    BREACH = "breach"
+    OTHER = "other"

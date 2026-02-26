@@ -54,6 +54,11 @@ async def ensure_indexes(db: AsyncIOMotorDatabase):
     # --- leak_sources ---
     await db["leak_sources"].create_indexes([
         IndexModel([("source_type", ASCENDING)]),
+        IndexModel(
+            [("sha256", ASCENDING)],
+            unique=True,
+            partialFilterExpression={"sha256": {"$exists": True, "$type": "string"}},
+        ),
     ])
 
     # --- vulnerabilities ---

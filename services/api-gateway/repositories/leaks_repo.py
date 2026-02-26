@@ -20,6 +20,11 @@ async def get_source_by_id(db: AsyncIOMotorDatabase, source_id: str) -> Optional
     return await mongo.find_one_entity(db, source_collection, {"_id": ObjectId(source_id)})
 
 
+async def find_source_by_sha256(db: AsyncIOMotorDatabase, sha256: str) -> Optional[dict]:
+    """Find existing leak source by SHA-256 hash (for deduplication)"""
+    return await mongo.find_one_entity(db, source_collection, {"sha256": sha256})
+
+
 async def get_all_sources(
     db: AsyncIOMotorDatabase, skip: int = 0, limit: int = 0,
 ) -> List[dict]:
@@ -56,7 +61,7 @@ async def search_records_fulltext(
     """Full-text search across email, username, domain"""
     return await elastic.multi_match_search(
         es, settings.ELASTICSEARCH_INDEX_NAME_LEAKS,
-        query_text, fields=["email", "username", "domain", "tags"], size=size, from_=from_,
+        query_text, fields=["email", "username", "domain", "tags", "url", "leaktype"], size=size, from_=from_,
     )
 
 

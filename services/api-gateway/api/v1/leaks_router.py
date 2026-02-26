@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Request, HTTPException, Query, Depends
 from models.responses.common import MessageResponse
+from models.requests.leaks_requests import TelegramLeakSourceRequest
 import services.leaks_service as leaks_service
 from api.v1.dependencies import PaginationParams
 from typing import List, Optional
@@ -13,6 +14,30 @@ router = APIRouter(prefix="/leaks", tags=["leaks"])
 async def create_source(body: dict, request: Request) -> dict:
     db = request.app.mongodb
     return await leaks_service.create_source(db, body)
+
+
+@router.post("/sources/telegram")
+async def create_telegram_source(body: TelegramLeakSourceRequest, request: Request) -> dict:
+    """
+    Create leak source from Telegram scraper. Deduplicates by sha256.
+    Returns 409 if a source with the same sha256 already exists.
+    """
+    db = request.app.mongodb
+    data = body.model_dump(exclude_none=True)
+    return await leaks_service.create_telegram_source(db, data)
+
+
+@router.get("/check-hash/{sha256}")
+async def check_hash_exists(sha256: str, request: Request) -> dict:
+    """
+    Check if a leak source with given sha256 already exists (for deduplication).
+    Returns exists: true/false and source_id if exists.
+    """
+    db = request.app.mongodb
+    source = await leaks_service.get_source_by_sha256(db, sha256)
+    if source:
+        return {"exists": True, "source_id": source.get("_id")}
+    return {"exists": False}
 
 
 @router.get("/sources")

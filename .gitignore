@@ -123,3 +123,6 @@ dmypy.json
 .cursor
 
 advisory_db/
+storage/
+leak_scraper_state.json
+leak_scraper_session.session

@@ -14,11 +14,52 @@ async def create_source(db: AsyncIOMotorDatabase, source_data: dict) -> dict:
     return await leaks_repo.create_source(db, source_data)
 
 
+async def create_telegram_source(db: AsyncIOMotorDatabase, data: dict) -> dict:
+    """
+    Create leak source from Telegram scraper. Checks sha256 for deduplication.
+    Raises HTTPException 409 if duplicate.
+    """
+    sha256 = data.get("sha256")
+    if not sha256:
+        raise HTTPException(status_code=400, detail="sha256 is required")
+
+    existing = await leaks_repo.find_source_by_sha256(db, sha256)
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail="Duplicate: leak source with this sha256 already exists",
+            headers={"X-Existing-Source-Id": str(existing.get("_id", ""))},
+        )
+
+    name = data.get("name") or f"combo_{data.get('channel_id', '')}_{data.get('message_id', '')}"
+    origin_url = f"tg://channel/{data.get('channel_id', '').lstrip('-')}?msg={data.get('message_id', '')}"
+
+    source_data = {
+        "name": name,
+        "source_type": "telegram",
+        "origin_url": origin_url,
+        "size_bytes": data.get("size_bytes"),
+        "sha256": sha256,
+        "metadata": {
+            "channel_id": data.get("channel_id"),
+            "message_id": data.get("message_id"),
+            "filename": data.get("filename"),
+            "downloaded_at": data.get("downloaded_at"),
+        },
+    }
+    return await create_source(db, source_data)
+
+
 async def get_source(db: AsyncIOMotorDatabase, source_id: str) -> dict:
     source = await leaks_repo.get_source_by_id(db, source_id)
     if not source:
         raise HTTPException(status_code=404, detail="Leak source not found")
     return source
+
+
+async def get_source_by_sha256(db: AsyncIOMotorDatabase, sha256: str) -> Optional[dict]:
+    """Get leak source by SHA-256 hash (for deduplication check)"""
+    return await leaks_repo.find_source_by_sha256(db, sha256)
 
 
 async def get_all_sources(
