@@ -22,13 +22,14 @@ class LeakSource(BaseModel):
     origin_url: Optional[str] = None
     size_bytes: Optional[int] = None
     sha256: Optional[str] = Field(None, description="SHA-256 hash of the file for deduplication")
+    status: Optional[str] = Field("pending", description="Processing status: pending, processing, done, error")
 
 
 class LeakRecord(BaseModel):
     """
     A single compromised record found inside a LeakSource.
     """
-    leak_source_id: str = Field(...)
+    leak_source_ids: List[str] = Field(default_factory=list, description="List of source IDs where this record was found")
 
     email: Optional[EmailStr] = None
     username: Optional[str] = None

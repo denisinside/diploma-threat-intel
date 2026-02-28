@@ -14,6 +14,7 @@ from loguru import logger
 from config.config import settings
 from core.client import create_client, ensure_authorized
 from core.scraper import run_watcher_cycle, run_full_sync
+from core.queue import get_publisher
 from database.redis import get_redis
 
 
@@ -31,6 +32,7 @@ async def _watcher_job():
             logger.error("Authorization failed")
             return
         redis = get_redis()
+        publisher = get_publisher(settings.RABBITMQ_URL)
         await run_watcher_cycle(
             client,
             channels=settings.channels_list,
@@ -39,6 +41,7 @@ async def _watcher_job():
             api_url=settings.API_GATEWAY_URL,
             max_concurrent=settings.MAX_CONCURRENT_DOWNLOADS,
             redis=redis,
+            publisher=publisher,
             batch_delay_seconds=settings.MESSAGE_BATCH_DELAY_SECONDS,
             batch_size=settings.MESSAGE_BATCH_SIZE,
             channel_delay_seconds=settings.CHANNEL_DELAY_SECONDS,
@@ -62,6 +65,7 @@ async def _full_sync_once():
             logger.error("Authorization failed")
             return
         redis = get_redis()
+        publisher = get_publisher(settings.RABBITMQ_URL)
         await run_full_sync(
             client,
             channels=settings.channels_list,
@@ -70,6 +74,7 @@ async def _full_sync_once():
             api_url=settings.API_GATEWAY_URL,
             max_concurrent=settings.MAX_CONCURRENT_DOWNLOADS,
             redis=redis,
+            publisher=publisher,
             batch_delay_seconds=settings.MESSAGE_BATCH_DELAY_SECONDS,
             batch_size=settings.MESSAGE_BATCH_SIZE,
             channel_delay_seconds=settings.CHANNEL_DELAY_SECONDS,
@@ -85,6 +90,26 @@ async def _watcher_loop(interval_minutes: int):
         await _watcher_job()
         logger.info(f"Next check in {interval_minutes} minute(s)")
         await asyncio.sleep(interval_minutes * 60)
+
+
+def _run_reset(channel_ids: list):
+    """Reset full_sync checkpoint to 0 for given channels (or all if empty)."""
+    redis = get_redis()
+    channels = channel_ids if channel_ids else settings.channels_list
+    if not channels:
+        logger.error("No channels to reset. Provide channel IDs or set LEAK_SCRAPER_CHANNELS.")
+        sys.exit(1)
+    for cid in channels:
+        redis.set_last_message_id_full_sync(cid, 0)
+        logger.info(f"Reset full_sync checkpoint to 0 for channel {cid}")
+    logger.info(f"Reset done for {len(channels)} channel(s)")
+
+
+def _run_set_from(channel_id: str, message_id: int):
+    """Set full_sync checkpoint for channel to start from given message."""
+    redis = get_redis()
+    redis.set_last_message_id_full_sync(channel_id, message_id)
+    logger.info(f"Set full_sync checkpoint for {channel_id} to message {message_id}")
 
 
 def main():
@@ -104,16 +129,44 @@ def main():
         default=settings.WATCHER_INTERVAL_MINUTES,
         help="Watcher interval in minutes (default from config)",
     )
+    parser.add_argument(
+        "--reset",
+        nargs="*",
+        metavar="CHANNEL_ID",
+        default=None,
+        help="Reset full_sync checkpoint to 0. No args = all channels from config, or list channel IDs",
+    )
+    parser.add_argument(
+        "--setFrom",
+        nargs=2,
+        metavar=("CHANNEL_ID", "MESSAGE_ID"),
+        default=None,
+        help="Set full_sync checkpoint: channel_id message_id (full_sync will start from that message)",
+    )
     args = parser.parse_args()
-
-    if not settings.channels_list:
-        logger.error("LEAK_SCRAPER_CHANNELS is empty. Set comma-separated channel IDs in .env")
-        sys.exit(1)
 
     try:
         get_redis()
     except Exception as e:
         logger.error(f"Redis connection failed (required): {e}")
+        sys.exit(1)
+
+    if args.reset is not None:
+        _run_reset(args.reset)
+        return
+
+    if args.setFrom is not None:
+        channel_id, msg_id_str = args.setFrom
+        try:
+            msg_id = int(msg_id_str)
+        except ValueError:
+            logger.error(f"Invalid message_id: {msg_id_str}")
+            sys.exit(1)
+        _run_set_from(channel_id, msg_id)
+        return
+
+    if not settings.channels_list:
+        logger.error("LEAK_SCRAPER_CHANNELS is empty. Set comma-separated channel IDs in .env")
         sys.exit(1)
 
     logger.info(f"Starting leak-scraper in '{args.mode}' mode, channels: {settings.channels_list}")

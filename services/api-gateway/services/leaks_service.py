@@ -40,11 +40,16 @@ async def create_telegram_source(db: AsyncIOMotorDatabase, data: dict) -> dict:
         "origin_url": origin_url,
         "size_bytes": data.get("size_bytes"),
         "sha256": sha256,
+        "status": "pending",
         "metadata": {
             "channel_id": data.get("channel_id"),
             "message_id": data.get("message_id"),
             "filename": data.get("filename"),
             "downloaded_at": data.get("downloaded_at"),
+            "source": data.get("source", "attachment"),
+            "original_url": data.get("original_url"),
+            "password": data.get("password"),
+            "local_path": data.get("local_path"),
         },
     }
     return await create_source(db, source_data)

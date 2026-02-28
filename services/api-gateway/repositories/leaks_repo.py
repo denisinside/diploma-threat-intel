@@ -42,7 +42,7 @@ async def search_records_by_domain(
 ) -> List[dict]:
     """Search leaked records by domain (e.g. 'company.com')"""
     return await elastic.term_search(
-        es, settings.ELASTICSEARCH_INDEX_NAME_LEAKS, "domain", domain, size=size, from_=from_,
+        es, settings.ELASTICSEARCH_INDEX_NAME_LEAKS, "domain.keyword", domain, size=size, from_=from_,
     )
 
 
@@ -51,7 +51,7 @@ async def search_records_by_email(
 ) -> List[dict]:
     """Search leaked records by exact email"""
     return await elastic.term_search(
-        es, settings.ELASTICSEARCH_INDEX_NAME_LEAKS, "email", email, size=size, from_=from_,
+        es, settings.ELASTICSEARCH_INDEX_NAME_LEAKS, "email.keyword", email, size=size, from_=from_,
     )
 
 
@@ -70,5 +70,5 @@ async def search_records_by_email_pattern(
 ) -> List[dict]:
     """Wildcard search (e.g. '*@company.com')"""
     return await elastic.wildcard_search(
-        es, settings.ELASTICSEARCH_INDEX_NAME_LEAKS, "email", pattern, size=size, from_=from_,
+        es, settings.ELASTICSEARCH_INDEX_NAME_LEAKS, "email.keyword", pattern, size=size, from_=from_,
     )

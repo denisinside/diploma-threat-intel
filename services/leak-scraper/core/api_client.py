@@ -28,10 +28,14 @@ async def register_leak_source(
     filename: str,
     size_bytes: int,
     sha256: str,
+    source: str = "attachment",
+    original_url: Optional[str] = None,
+    password: Optional[str] = None,
+    local_path: Optional[str] = None,
 ) -> Optional[dict]:
     """
     Register new leak source via API. Returns created source dict or None on failure.
-    Raises no exception on 409 (duplicate) - caller should handle.
+    source: "attachment" (TG file) or "url" (cloud link).
     """
     url = f"{api_url.rstrip('/')}/leaks/sources/telegram"
     payload = {
@@ -41,15 +45,22 @@ async def register_leak_source(
         "size_bytes": size_bytes,
         "sha256": sha256,
         "downloaded_at": datetime.now(timezone.utc).isoformat(),
+        "source": source,
     }
+    if original_url:
+        payload["original_url"] = original_url
+    if password:
+        payload["password"] = password
+    if local_path:
+        payload["local_path"] = local_path
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             r = await client.post(url, json=payload)
             if r.status_code in (200, 201):
                 return r.json()
             if r.status_code == 409:
-                logger.info(f"Duplicate sha256 {sha256[:16]}... - skipped")
-                return None
+                logger.info(f"Duplicate sha256 {sha256[:16]}... - skipped (409)")
+                return {"duplicate": True}
             logger.warning(f"API error {r.status_code}: {r.text}")
     except Exception as e:
         logger.error(f"Register leak source failed: {e}")

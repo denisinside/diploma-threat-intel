@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
     REDIS_PASSWORD: str = ""
+    RABBITMQ_URL: str = "amqp://guest:guest@localhost:5672/"
 
     model_config = SettingsConfigDict(
         env_file="../../.env",
