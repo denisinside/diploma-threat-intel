@@ -31,17 +31,22 @@ async def register_user(db: AsyncIOMotorDatabase, request: RegisterUserRequest) 
     if await users_repo.email_exists(db, request.email):
         raise HTTPException(status_code=409, detail="User with this email already exists")
 
+    role = "viewer"
     if request.company_id:
         company = await companies_repo.get_company_by_id(db, request.company_id)
         if not company:
             raise HTTPException(status_code=404, detail="Company not found")
+        existing_users = await users_repo.get_users_by_company(db, request.company_id, skip=0, limit=1)
+        # First user in company becomes admin for easier bootstrap.
+        if not existing_users:
+            role = "admin"
 
     user_data = {
         "email": request.email,
         "full_name": request.full_name,
         "password_hash": hash_password(request.password),
         "company_id": request.company_id,
-        "role": "viewer",
+        "role": role,
         "last_login": None,
         "created_at": datetime.now(timezone.utc),
         "updated_at": datetime.now(timezone.utc),

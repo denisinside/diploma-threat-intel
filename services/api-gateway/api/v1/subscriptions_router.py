@@ -31,13 +31,13 @@ async def get_company_subscriptions(
     )
 
 
-@router.get("/{sub_id}")
+@router.get("/rules/{sub_id}")
 async def get_subscription(sub_id: str, request: Request) -> dict:
     db = request.app.mongodb
     return await subscriptions_service.get_subscription(db, sub_id)
 
 
-@router.put("/{sub_id}")
+@router.put("/rules/{sub_id}")
 async def update_subscription(
     sub_id: str, body: UpdateSubscriptionRequest, request: Request,
 ) -> dict:
@@ -45,7 +45,7 @@ async def update_subscription(
     return await subscriptions_service.update_subscription(db, sub_id, body)
 
 
-@router.delete("/{sub_id}")
+@router.delete("/rules/{sub_id}")
 async def delete_subscription(sub_id: str, request: Request) -> MessageResponse:
     db = request.app.mongodb
     await subscriptions_service.delete_subscription(db, sub_id)

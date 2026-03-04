@@ -126,3 +126,7 @@ advisory_db/
 storage/
 leak_scraper_state.json
 leak_scraper_session.session
+
+# Frontend artifacts
+node_modules/
+*.tsbuildinfo

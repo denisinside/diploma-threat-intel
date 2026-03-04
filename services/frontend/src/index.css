@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg-slate: #0f172a;
+    --accent-amber: #f59e0b;
+    --accent-sky: #38bdf8;
+    --border-slate: rgba(71, 85, 105, 0.5);
+  }
+
+  html {
+    @apply bg-slate-950 text-slate-100 antialiased;
+  }
+
+  body {
+    @apply font-sans min-h-screen;
+  }
+}
+
+/* Subtle glassmorphism for panels */
+@layer components {
+  .glass-panel {
+    @apply bg-slate-900/80 backdrop-blur-sm border border-slate-700/50 rounded-lg;
+  }
+
+  .glass-panel-hover {
+    @apply glass-panel hover:border-slate-600/60 transition-colors;
+  }
+}
