@@ -1,7 +1,8 @@
-import jwt
 from datetime import datetime, timedelta, timezone
 from core.config import settings
 import bcrypt
+from jose import jwt
+from jose.exceptions import ExpiredSignatureError, JWTError
 
 
 def hash_password(password: str) -> str:
@@ -24,7 +25,7 @@ def decode_token(token: str) -> dict:
     """Decode and verify a JWT token"""
     try:
         return jwt.decode(token, settings.JWT_SECRET, algorithms=["HS256"])
-    except jwt.ExpiredSignatureError:
+    except ExpiredSignatureError:
         return None
-    except jwt.InvalidTokenError:
+    except JWTError:
         return None

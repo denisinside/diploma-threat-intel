@@ -28,6 +28,7 @@ async def ensure_indexes(db: AsyncIOMotorDatabase):
     # --- assets ---
     await db["assets"].create_indexes([
         IndexModel([("company_id", ASCENDING)]),
+        IndexModel([("company_id", ASCENDING), ("name", ASCENDING)]),
         IndexModel([("company_id", ASCENDING), ("type", ASCENDING)]),
         IndexModel([("company_id", ASCENDING), ("is_active", ASCENDING)]),
     ])
@@ -36,6 +37,9 @@ async def ensure_indexes(db: AsyncIOMotorDatabase):
     await db["tickets"].create_indexes([
         IndexModel([("company_id", ASCENDING)]),
         IndexModel([("company_id", ASCENDING), ("status", ASCENDING)]),
+        IndexModel([("company_id", ASCENDING), ("status", ASCENDING), ("vulnerability_id", ASCENDING)]),
+        IndexModel([("company_id", ASCENDING), ("status", ASCENDING), ("detected_at", DESCENDING)]),
+        IndexModel([("company_id", ASCENDING), ("status", ASCENDING), ("resolved_at", DESCENDING)]),
         IndexModel([("asset_id", ASCENDING)]),
         IndexModel([("vulnerability_id", ASCENDING)]),
         IndexModel([("company_id", ASCENDING), ("created_at", DESCENDING)]),
@@ -65,6 +69,7 @@ async def ensure_indexes(db: AsyncIOMotorDatabase):
     await db["vulnerabilities"].create_indexes([
         IndexModel([("id", ASCENDING)], unique=True),
         IndexModel([("aliases", ASCENDING)]),
+        IndexModel([("database_specific.severity", ASCENDING)]),
         IndexModel([("affected.package.ecosystem", ASCENDING)]),
         IndexModel([("affected.package.name", ASCENDING)]),
         IndexModel([("modified", DESCENDING)]),

@@ -5,8 +5,12 @@ import { SectionCard } from "@/components/ui/SectionCard";
 import { SeverityBadge } from "@/components/ui/SeverityBadge";
 import { StatCard } from "@/components/ui/StatCard";
 import { useCreateTicket, useTicketCount, useTickets, useUpdateTicket } from "@/features/tickets/hooks";
+import { useAssets } from "@/features/assets/hooks";
+import { useVulnSearch } from "@/features/vulns/hooks";
 import { useAuth } from "@/hooks/useAuth";
+import { useCanMutate } from "@/hooks/useRoleGuard";
 import { formatDate } from "@/lib/format";
+import { toast } from "@/lib/toast";
 import type { Ticket, TicketStatus } from "@/types";
 
 const statusOptions: Array<TicketStatus | "all"> = [
@@ -18,16 +22,29 @@ const statusOptions: Array<TicketStatus | "all"> = [
   "false_positive",
 ];
 
+function getCveId(v: { aliases?: string[]; id?: string }): string {
+  return v.aliases?.find((a) => String(a).toUpperCase().startsWith("CVE-")) ?? v.id ?? "";
+}
+
 export function TicketsPage() {
   const { session } = useAuth();
   const companyId = session?.user?.company_id;
+  const canMutate = useCanMutate();
   const [status, setStatus] = useState<TicketStatus | "all">("all");
   const [assetId, setAssetId] = useState("");
   const [vulnerabilityId, setVulnerabilityId] = useState("");
+  const [cveSearchQuery, setCveSearchQuery] = useState("");
   const [notes, setNotes] = useState("");
   const [ticketError, setTicketError] = useState("");
   const createTicket = useCreateTicket();
   const updateTicket = useUpdateTicket();
+
+  const { data: assets = [] } = useAssets(companyId);
+  const { data: vulnSearch } = useVulnSearch({
+    q: cveSearchQuery.length >= 2 ? cveSearchQuery : "CVE-2024",
+    limit: 15,
+  });
+  const vulnSuggestions = cveSearchQuery.length >= 2 ? (vulnSearch?.items ?? []) : [];
 
   const { data: tickets = [], isLoading, error } = useTickets(
     companyId,
@@ -39,9 +56,21 @@ export function TicketsPage() {
 
   const columns = useMemo<Array<ColumnDef<Ticket>>>(
     () => [
-      { header: "Ticket ID", accessorKey: "_id" },
-      { header: "Asset ID", accessorKey: "asset_id" },
-      { header: "Vulnerability ID", accessorKey: "vulnerability_id" },
+      { header: "Ticket ID", accessorKey: "_id", cell: ({ row }) => <span className="font-mono text-xs">{String(row.original._id).slice(-8)}</span> },
+      {
+        header: "Asset",
+        cell: ({ row }) => {
+          const aid = row.original.asset_id;
+          const asset = assets.find((a) => a._id === aid);
+          return asset ? `${asset.name}${asset.version ? ` ${asset.version}` : ""}` : aid;
+        },
+      },
+      {
+        header: "Vulnerability",
+        cell: ({ row }) => (
+          <span className="font-mono text-sm">{row.original.vulnerability_id}</span>
+        ),
+      },
       {
         header: "Priority",
         cell: ({ row }) => <SeverityBadge severity={row.original.priority} />,
@@ -53,25 +82,61 @@ export function TicketsPage() {
       },
       {
         header: "Actions",
-        cell: ({ row }) => (
-          <button
-            type="button"
-            disabled={row.original.status === "resolved"}
-            onClick={() =>
-              updateTicket.mutate({
-                ticketId: row.original._id,
-                payload: { status: "resolved" },
-              })
-            }
-            className="text-xs text-emerald-300 hover:text-emerald-200 disabled:text-slate-500"
-          >
-            mark resolved
-          </button>
-        ),
+        cell: ({ row }) =>
+          canMutate ? (
+            <div className="flex gap-2">
+              {row.original.status !== "resolved" ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateTicket.mutate({
+                      ticketId: row.original._id,
+                      payload: { status: "resolved" },
+                    })
+                  }
+                  className="text-xs text-emerald-300 hover:text-emerald-200"
+                >
+                  mark resolved
+                </button>
+              ) : null}
+            </div>
+          ) : (
+            <span className="text-slate-500 text-xs">—</span>
+          ),
       },
     ],
-    [updateTicket]
+    [updateTicket, assets, canMutate]
   );
+
+  const handleCreateTicket = (e: React.FormEvent) => {
+    e.preventDefault();
+    setTicketError("");
+    if (!companyId) return;
+    if (!assetId.trim() || !vulnerabilityId.trim()) {
+      setTicketError("Select an asset and a vulnerability.");
+      return;
+    }
+    createTicket.mutate(
+      {
+        company_id: companyId,
+        asset_id: assetId.trim(),
+        vulnerability_id: vulnerabilityId.trim(),
+        notes: notes.trim() || undefined,
+      },
+      {
+        onSuccess: () => {
+          setAssetId("");
+          setVulnerabilityId("");
+          setCveSearchQuery("");
+          setNotes("");
+        },
+        onError: (err) => {
+          setTicketError(err instanceof Error ? err.message : "Failed to create ticket.");
+          toast.error(err instanceof Error ? err.message : "Failed to create ticket.");
+        },
+      }
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -99,66 +164,94 @@ export function TicketsPage() {
           </select>
         }
       >
-        {companyId ? (
+        {companyId && canMutate ? (
           <form
             className="mb-4 grid grid-cols-1 md:grid-cols-4 gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              setTicketError("");
-              if (!companyId) return;
-              if (!assetId.trim() || !vulnerabilityId.trim()) {
-                setTicketError("asset_id and vulnerability_id are required.");
-                return;
-              }
-              createTicket.mutate(
-                {
-                  company_id: companyId,
-                  asset_id: assetId.trim(),
-                  vulnerability_id: vulnerabilityId.trim(),
-                  notes: notes.trim() || undefined,
-                },
-                {
-                  onSuccess: () => {
-                    setAssetId("");
-                    setVulnerabilityId("");
-                    setNotes("");
-                  },
-                  onError: (mutationError) =>
-                    setTicketError(
-                      mutationError instanceof Error ? mutationError.message : "Failed to create ticket."
-                    ),
-                }
-              );
-            }}
+            onSubmit={handleCreateTicket}
           >
-            <input
-              value={assetId}
-              onChange={(event) => setAssetId(event.target.value)}
-              placeholder="Asset ID"
-              className="bg-slate-800/60 border border-slate-600 rounded px-3 py-2 text-sm"
-            />
-            <input
-              value={vulnerabilityId}
-              onChange={(event) => setVulnerabilityId(event.target.value)}
-              placeholder="Vulnerability ID (CVE-...)"
-              className="bg-slate-800/60 border border-slate-600 rounded px-3 py-2 text-sm"
-            />
-            <input
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-              placeholder="Notes (optional)"
-              className="bg-slate-800/60 border border-slate-600 rounded px-3 py-2 text-sm"
-            />
-            <button
-              type="submit"
-              className="rounded border border-tactical-sky/40 text-tactical-sky hover:bg-tactical-sky/15 text-sm px-3 py-2"
-            >
-              {createTicket.isPending ? "Creating..." : "Create ticket"}
-            </button>
+            <div className="relative">
+              <label className="block text-xs text-slate-400 mb-1">Asset</label>
+              <select
+                value={assetId}
+                onChange={(e) => setAssetId(e.target.value)}
+                className="w-full bg-slate-800/60 border border-slate-600 rounded px-3 py-2 text-sm"
+                required
+              >
+                <option value="">Select asset...</option>
+                {assets.map((a) => (
+                  <option key={a._id} value={a._id}>
+                    {a.name}
+                    {a.version ? ` ${a.version}` : ""} ({a.type})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="relative">
+              <label className="block text-xs text-slate-400 mb-1">Vulnerability (CVE)</label>
+              <div className="relative">
+                <input
+                  value={cveSearchQuery || vulnerabilityId}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setCveSearchQuery(v);
+                    if (/^CVE-\d{4}-\d+$/i.test(v)) setVulnerabilityId(v);
+                    else if (!v) setVulnerabilityId("");
+                  }}
+                  onBlur={() => {
+                    if (/^CVE-\d{4}-\d+$/i.test(cveSearchQuery)) setVulnerabilityId(cveSearchQuery);
+                  }}
+                  placeholder="Search or type CVE-YYYY-NNNNN"
+                  className="w-full bg-slate-800/60 border border-slate-600 rounded px-3 py-2 text-sm"
+                />
+                {cveSearchQuery.length >= 2 && vulnSuggestions.length > 0 ? (
+                  <ul className="absolute z-10 mt-1 w-full max-h-48 overflow-auto bg-slate-800 border border-slate-600 rounded shadow-lg">
+                    {vulnSuggestions.map((v) => {
+                      const cve = getCveId(v);
+                      return (
+                        <li key={v.id}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setVulnerabilityId(cve);
+                              setCveSearchQuery(cve);
+                            }}
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-slate-700"
+                          >
+                            {cve}
+                            {v.database_specific?.severity ? ` (${v.database_specific.severity})` : ""}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : null}
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Notes</label>
+              <input
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Optional"
+                className="w-full bg-slate-800/60 border border-slate-600 rounded px-3 py-2 text-sm"
+              />
+            </div>
+            <div className="flex items-end">
+              <button
+                type="submit"
+                disabled={!assetId || !vulnerabilityId}
+                className="rounded border border-tactical-sky/40 text-tactical-sky hover:bg-tactical-sky/15 text-sm px-3 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {createTicket.isPending ? "Creating..." : "Create ticket"}
+              </button>
+            </div>
           </form>
         ) : null}
         {ticketError ? <p className="mb-2 text-sm text-red-300">{ticketError}</p> : null}
         {error ? <p className="text-sm text-red-300">{(error as Error).message}</p> : null}
+        {!canMutate && companyId ? (
+          <p className="mb-2 text-sm text-slate-400">Viewer role: you cannot create or update tickets.</p>
+        ) : null}
         {isLoading ? (
           <p className="text-slate-400">Loading...</p>
         ) : (

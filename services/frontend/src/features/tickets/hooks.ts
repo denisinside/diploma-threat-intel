@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { TicketStatus } from "@/types";
+import { toast } from "@/lib/toast";
 import { ticketsApi } from "./api";
 
 export function useTickets(companyId?: string, status?: TicketStatus) {
@@ -25,7 +26,9 @@ export function useCreateTicket() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tickets"] });
       queryClient.invalidateQueries({ queryKey: ["tickets-count"] });
+      toast.success("Ticket created");
     },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed to create ticket"),
   });
 }
 
@@ -37,6 +40,8 @@ export function useUpdateTicket() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tickets"] });
       queryClient.invalidateQueries({ queryKey: ["tickets-count"] });
+      toast.success("Ticket updated");
     },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed to update ticket"),
   });
 }

@@ -1,0 +1,7 @@
+pika
+pymongo
+requests
+loguru
+pydantic
+pydantic-settings
+python-dotenv

@@ -1,5 +1,11 @@
 import { apiClient } from "@/lib/api";
-import type { NotificationChannel, Subscription } from "@/types";
+import type {
+  ChannelType,
+  NotificationChannel,
+  NotificationChannelConfig,
+  Severity,
+  Subscription,
+} from "@/types";
 
 export const subscriptionsApi = {
   getCompanySubscriptions: (companyId: string) =>
@@ -19,9 +25,17 @@ export const subscriptionsApi = {
   createChannel: (payload: {
     company_id: string;
     name: string;
-    channel_type: "email" | "telegram" | "slack" | "discord" | "webhook";
-    config: Record<string, unknown>;
+    channel_type: ChannelType;
+    config: NotificationChannelConfig;
   }) => apiClient.post<NotificationChannel>("/subscriptions/channels", payload),
   updateChannel: (channelId: string, payload: Partial<NotificationChannel>) =>
     apiClient.put<NotificationChannel>(`/subscriptions/channels/${channelId}`, payload),
+  deleteChannel: (channelId: string) =>
+    apiClient.delete<{ message: string }>(`/subscriptions/channels/${channelId}`),
+  deleteSubscription: (subId: string) =>
+    apiClient.delete<{ message: string }>(`/subscriptions/rules/${subId}`),
+  updateSubscription: (subId: string, payload: { keyword?: string; min_severity?: Severity }) =>
+    apiClient.put<Subscription>(`/subscriptions/rules/${subId}`, payload),
+  testChannel: (channelId: string) =>
+    apiClient.post<{ message: string }>(`/subscriptions/channels/${channelId}/test`),
 };

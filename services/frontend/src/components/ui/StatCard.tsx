@@ -1,10 +1,11 @@
 import { cn } from "@/lib/utils";
+import type { ReactNode } from "react";
 
 type Props = {
   label: string;
   value: string | number;
   accent?: "amber" | "sky";
-  hint?: string;
+  hint?: ReactNode;
 };
 
 export function StatCard({ label, value, accent = "sky", hint }: Props) {

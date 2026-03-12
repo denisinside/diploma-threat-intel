@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     ELASTICSEARCH_INDEX_NAME_LEAKS: str
 
     RABBITMQ_URL: str
+    RABBITMQ_NOTIFICATIONS_EXCHANGE: str = "notifications.events"
     
     JWT_SECRET: str
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60

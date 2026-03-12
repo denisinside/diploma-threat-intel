@@ -28,3 +28,14 @@ export function useDeleteAsset() {
     },
   });
 }
+
+export function useImportAssets() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ companyId, file }: { companyId: string; file: File }) =>
+      assetsApi.importFromFile(companyId, file),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["assets"] });
+    },
+  });
+}

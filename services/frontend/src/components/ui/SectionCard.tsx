@@ -1,7 +1,7 @@
 import type { PropsWithChildren, ReactNode } from "react";
 
 type Props = PropsWithChildren<{
-  title: string;
+  title: ReactNode;
   rightSlot?: ReactNode;
 }>;
 

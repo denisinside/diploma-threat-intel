@@ -31,6 +31,7 @@ class ChannelType(str, Enum):
     SLACK = "slack"
     DISCORD = "discord"
     WEBHOOK = "webhook"
+    SIGNAL = "signal"
 
 class SubscriptionType(str, Enum):
     VULNERABILITY = "vulnerability"

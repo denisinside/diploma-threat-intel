@@ -63,3 +63,26 @@ async def count_tickets_by_company(
     if status:
         query["status"] = status
     return await mongo.count_documents(db, collection, query)
+
+
+async def get_tickets_by_company_statuses(
+    db: AsyncIOMotorDatabase, company_id: str, statuses: List[str],
+) -> List[dict]:
+    if not statuses:
+        return []
+    projection = {
+        "_id": 1,
+        "asset_id": 1,
+        "vulnerability_id": 1,
+        "status": 1,
+        "detected_at": 1,
+        "resolved_at": 1,
+    }
+    docs = await db[collection].find(
+        {"company_id": company_id, "status": {"$in": statuses}},
+        projection,
+    ).to_list(None)
+    for doc in docs:
+        if "_id" in doc:
+            doc["_id"] = str(doc["_id"])
+    return docs

@@ -67,6 +67,41 @@ async def search_sources(
     return [hit["_source"] for hit in hits]
 
 
+async def search_with_total(
+    client: AsyncElasticsearch,
+    index_name: str,
+    query: dict[str, Any],
+    size: int = 10,
+    from_: int = 0,
+    sort: list[dict[str, Any]] | None = None,
+    track_total_hits: bool | int = True,
+) -> tuple[list[dict[str, Any]], int]:
+    """Search and return (sources, total_count). track_total_hits=True for accurate count beyond 10k."""
+    body: dict[str, Any] = {"query": query, "size": size, "from": from_, "track_total_hits": track_total_hits}
+    if sort:
+        body["sort"] = sort
+    response = await client.search(index=index_name, body=body)
+    hits = response.get("hits", {})
+    total = hits.get("total", 0)
+    if isinstance(total, dict):
+        total = total.get("value", 0)
+    sources = [h["_source"] for h in hits.get("hits", [])]
+    return sources, total
+
+
+async def search_with_aggregations(
+    client: AsyncElasticsearch,
+    index_name: str,
+    query: dict[str, Any],
+    aggregations: dict[str, Any],
+    size: int = 0,
+) -> dict[str, Any]:
+    """Run search with aggregations, return aggregation results"""
+    body: dict[str, Any] = {"query": query, "size": size, "aggs": aggregations}
+    response = await client.search(index=index_name, body=body)
+    return response.get("aggregations", {})
+
+
 async def multi_match_search(
     client: AsyncElasticsearch,
     index_name: str,

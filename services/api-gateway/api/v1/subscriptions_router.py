@@ -91,3 +91,11 @@ async def delete_channel(channel_id: str, request: Request) -> MessageResponse:
     db = request.app.mongodb
     await subscriptions_service.delete_channel(db, channel_id)
     return MessageResponse(message="Notification channel deleted successfully")
+
+
+@router.post("/channels/{channel_id}/test")
+async def test_channel(channel_id: str, request: Request) -> MessageResponse:
+    db = request.app.mongodb
+    rabbitmq = request.app.rabbitmq
+    await subscriptions_service.send_test_notification(db, channel_id, rabbitmq)
+    return MessageResponse(message="Test notification sent")

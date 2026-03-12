@@ -1,4 +1,6 @@
+import { useCallback } from "react";
 import { NavLink } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   LayoutDashboard,
   Server,
@@ -9,6 +11,11 @@ import {
   Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
+import { leaksApi } from "@/features/leaks/api";
+import { getLeakAnalyticsQueryKey } from "@/features/leaks/hooks";
+import { vulnsApi } from "@/features/vulns/api";
+import { getVulnStatsQueryKey } from "@/features/vulns/hooks";
 
 const navItems = [
   { to: "/overview", icon: LayoutDashboard, label: "OVERVIEW" },
@@ -21,6 +28,33 @@ const navItems = [
 ];
 
 export function Sidebar() {
+  const queryClient = useQueryClient();
+  const { session } = useAuth();
+  const companyId = session?.user?.company_id;
+
+  const prefetchByRoute = useCallback(
+    (to: string) => {
+      if (!session?.token) return;
+      if (to === "/vulnerabilities") {
+        const params = { all: true, company_id: companyId };
+        void queryClient.prefetchQuery({
+          queryKey: getVulnStatsQueryKey(params),
+          queryFn: () => vulnsApi.getStats(params),
+          staleTime: 5 * 60 * 1000,
+        });
+      }
+      if (to === "/leaks") {
+        const params = {};
+        void queryClient.prefetchQuery({
+          queryKey: getLeakAnalyticsQueryKey(params, companyId),
+          queryFn: () => leaksApi.getAnalytics({ company_id: companyId }),
+          staleTime: 5 * 60 * 1000,
+        });
+      }
+    },
+    [queryClient, session?.token, companyId]
+  );
+
   return (
     <aside className="w-56 flex-shrink-0 glass-panel border-r border-slate-700/50 flex flex-col">
       <div className="p-4 border-b border-slate-700/50">
@@ -34,6 +68,8 @@ export function Sidebar() {
           <NavLink
             key={to}
             to={to}
+            onMouseEnter={() => prefetchByRoute(to)}
+            onFocus={() => prefetchByRoute(to)}
             className={({ isActive }) =>
               cn(
                 "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors",

@@ -1,4 +1,7 @@
 fastapi
+httpx
+tomli
+pyyaml
 motor
 elasticsearch[async]==8.11.1
 loguru
@@ -10,3 +13,4 @@ PyJWT
 python-jose[cryptography]
 passlib[bcrypt]
 python-dotenv
+python-multipart

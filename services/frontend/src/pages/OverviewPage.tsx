@@ -19,10 +19,12 @@ export function OverviewPage() {
   const { data: assets = [] } = useAssets(companyId);
   const { data: leakSources = [] } = useLeakSources();
   const { data: openTickets } = useTicketCount(companyId, "open");
-  const { data: criticalVulns = [] } = useVulnSearch("CVE");
+  const { data: vulnSearchResult } = useVulnSearch({ q: "CVE" });
+  const criticalVulns = vulnSearchResult?.items ?? [];
 
   const criticalCount = criticalVulns.filter(
-    (item) => normalizeSeverity(item.database_specific?.severity) === "critical"
+    (item: { database_specific?: { severity?: string } }) =>
+      normalizeSeverity(item.database_specific?.severity) === "critical"
   ).length;
 
   const leakSourceDistribution = useMemo(() => {

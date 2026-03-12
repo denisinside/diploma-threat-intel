@@ -36,4 +36,4 @@ async def reset_password(body: ResetPasswordRequest, request: Request) -> Messag
 @router.post("/forgot-password")
 async def forgot_password(body: ForgotPasswordRequest, request: Request) -> MessageResponse:
     db = request.app.mongodb
-    return await auth_service.forgot_password(db, body)
+    return await auth_service.forgot_password(db, body, request.app.rabbitmq)

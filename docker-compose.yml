@@ -60,7 +60,43 @@ services:
     depends_on:
       - elasticsearch
 
+  notification-service:
+    image: python:3.12-slim
+    working_dir: /app
+    volumes:
+      - ./:/app
+    command: >
+      sh -c "pip install -r services/notification-service/requirements.txt && python services/notification-service/main.py"
+    environment:
+      - RABBITMQ_URL=${RABBITMQ_URL}
+      - RABBITMQ_EXCHANGE=notifications.events
+      - RABBITMQ_QUEUE=notification_events
+      - RABBITMQ_DLQ=notification_events.dlq
+      - RABBITMQ_MAX_RETRIES=5
+      - MONGODB_URI=${MONGODB_URI}
+      - MONGODB_DB_NAME=${MONGODB_DB_NAME}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
+      - REQUEST_TIMEOUT_SECONDS=15
+    depends_on:
+      - rabbitmq
+      - mongodb
+
+  signal-api:
+    image: bbernhard/signal-cli-rest-api:latest
+    ports:
+      - "9922:8080"
+    environment:
+      - MODE=native
+    volumes:
+      - signal_cli_data:/home/.local/share/signal-cli
+
 volumes:
   mongo_data:
   es_data:
   redis_data:
+  signal_cli_data:

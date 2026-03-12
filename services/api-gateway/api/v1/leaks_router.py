@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Request, HTTPException, Query, Depends
 from models.responses.common import MessageResponse
+from models.responses.leaks_responses import LeakAnalyticsResponse, LeakSearchResponse
 from models.requests.leaks_requests import TelegramLeakSourceRequest
 import services.leaks_service as leaks_service
 from api.v1.dependencies import PaginationParams
@@ -24,7 +25,7 @@ async def create_telegram_source(body: TelegramLeakSourceRequest, request: Reque
     """
     db = request.app.mongodb
     data = body.model_dump(exclude_none=True)
-    return await leaks_service.create_telegram_source(db, data)
+    return await leaks_service.create_telegram_source(db, data, request.app.rabbitmq)
 
 
 @router.get("/check-hash/{sha256}")
@@ -64,7 +65,7 @@ async def delete_source(source_id: str, request: Request) -> MessageResponse:
 
 # --- Leak Records search (Elasticsearch) ---
 
-@router.get("/search")
+@router.get("/search", response_model=LeakSearchResponse)
 async def search_leaks(
     request: Request,
     q: Optional[str] = Query(None, min_length=2, description="Full-text search"),
@@ -72,22 +73,46 @@ async def search_leaks(
     email: Optional[str] = Query(None, description="Search by exact email"),
     email_pattern: Optional[str] = Query(None, description="Wildcard search (e.g. '*@company.com')"),
     pg: PaginationParams = Depends(PaginationParams),
-) -> List[dict]:
+) -> LeakSearchResponse:
     """Search leaked records via Elasticsearch"""
+    db = request.app.mongodb
     es = request.app.elasticsearch
+    limit = pg.limit if pg.limit > 0 else 25
 
     if email:
-        return await leaks_service.search_by_email(es, email, size=pg.limit, skip=pg.skip)
+        return await leaks_service.search_records_paged(db, es, email=email, size=limit, skip=pg.skip)
     elif domain:
-        return await leaks_service.search_by_domain(es, domain, size=pg.limit, skip=pg.skip)
+        return await leaks_service.search_records_paged(db, es, domain=domain, size=limit, skip=pg.skip)
     elif email_pattern:
-        return await leaks_service.search_by_email_pattern(
-            es, email_pattern, size=pg.limit, skip=pg.skip,
+        return await leaks_service.search_records_paged(
+            db, es, email_pattern=email_pattern, size=limit, skip=pg.skip,
         )
     elif q:
-        return await leaks_service.search_fulltext(es, q, size=pg.limit, skip=pg.skip)
+        return await leaks_service.search_records_paged(db, es, q=q, size=limit, skip=pg.skip)
     else:
         raise HTTPException(
             status_code=400,
             detail="Provide at least one search parameter: q, domain, email, or email_pattern",
         )
+
+
+@router.get("/analytics", response_model=LeakAnalyticsResponse)
+async def get_leaks_analytics(
+    request: Request,
+    q: Optional[str] = Query(None, min_length=2, description="Full-text search"),
+    domain: Optional[str] = Query(None, description="Search by domain (e.g. 'company.com')"),
+    email: Optional[str] = Query(None, description="Search by exact email"),
+    email_pattern: Optional[str] = Query(None, description="Wildcard search (e.g. '*@company.com')"),
+    company_id: Optional[str] = Query(None, description="Company ID for 'our company' trend line"),
+) -> LeakAnalyticsResponse:
+    db = request.app.mongodb
+    es = request.app.elasticsearch
+    return await leaks_service.get_analytics(
+        db,
+        es,
+        q=q,
+        domain=domain,
+        email=email,
+        email_pattern=email_pattern,
+        company_id=company_id,
+    )

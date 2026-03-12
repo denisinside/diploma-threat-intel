@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, HTTPException, Query, Depends
+from fastapi import APIRouter, Request, HTTPException, Query, Depends, UploadFile, File
 from models.requests.assets_requests import CreateAssetRequest, UpdateAssetRequest
 from models.responses.common import MessageResponse
 import services.assets_service as assets_service
@@ -12,6 +12,16 @@ router = APIRouter(prefix="/assets", tags=["assets"])
 async def create_asset(body: CreateAssetRequest, request: Request) -> dict:
     db = request.app.mongodb
     return await assets_service.create_asset(db, body)
+
+
+@router.post("/import")
+async def import_assets(
+    request: Request,
+    company_id: str = Query(..., description="Company ID"),
+    file: UploadFile = File(..., description="Dependency file (package-lock, requirements.txt, etc.)"),
+) -> dict:
+    db = request.app.mongodb
+    return await assets_service.import_assets_from_file(db, company_id, file)
 
 
 @router.get("/")

@@ -3,16 +3,24 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/ui/DataTable";
 import { SectionCard } from "@/components/ui/SectionCard";
 import { StatCard } from "@/components/ui/StatCard";
-import { useAssets, useCreateAsset, useDeleteAsset } from "@/features/assets/hooks";
+import { HelpCircle } from "lucide-react";
+import { useAssets, useCreateAsset, useDeleteAsset, useImportAssets } from "@/features/assets/hooks";
 import { useAuth } from "@/hooks/useAuth";
+import { useCanMutate } from "@/hooks/useRoleGuard";
+import { toast } from "@/lib/toast";
 import type { Asset } from "@/types";
+
+const SUPPORTED_IMPORT_FILES =
+  "package-lock.json, package.json, yarn.lock, pnpm-lock.yaml, requirements.txt, pyproject.toml, poetry.lock, Pipfile, Pipfile.lock, Gemfile.lock, composer.json, composer.lock, pom.xml, build.gradle, pubspec.yaml, Package.swift, Package.resolved, Cargo.toml, Cargo.lock, go.sum, SBOM (CycloneDX, SPDX)";
 
 export function AssetsPage() {
   const { session } = useAuth();
   const companyId = session?.user?.company_id;
+  const canMutate = useCanMutate();
   const { data: assets = [], isLoading, error } = useAssets(companyId);
   const createAsset = useCreateAsset();
   const deleteAsset = useDeleteAsset();
+  const importAssets = useImportAssets();
   const [name, setName] = useState("");
   const [type, setType] = useState<Asset["type"]>("domain");
   const [version, setVersion] = useState("");
@@ -34,20 +42,28 @@ export function AssetsPage() {
           ),
       },
       { header: "Source File", accessorKey: "source_file" },
-      {
-        header: "Actions",
-        cell: ({ row }) => (
-          <button
-            type="button"
-            onClick={() => deleteAsset.mutate(row.original._id)}
-            className="text-red-300 hover:text-red-200 text-xs"
-          >
-            delete
-          </button>
-        ),
-      },
+      ...(canMutate
+        ? [
+            {
+              header: "Actions",
+              cell: ({ row }: { row: { original: Asset } }) => (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm("Delete this asset?")) {
+                      deleteAsset.mutate(row.original._id);
+                    }
+                  }}
+                  className="text-red-300 hover:text-red-200 text-xs"
+                >
+                  delete
+                </button>
+              ),
+            } as ColumnDef<Asset>,
+          ]
+        : []),
     ],
-    [deleteAsset]
+    [deleteAsset, canMutate]
   );
 
   const activeCount = assets.filter((asset) => asset.is_active).length;
@@ -64,7 +80,49 @@ export function AssetsPage() {
       </div>
 
       <SectionCard title="Asset Inventory">
-        {companyId ? (
+        {companyId && canMutate ? (
+          <>
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <label className="text-sm text-slate-400">
+              Import from file:
+            </label>
+            <input
+              type="file"
+              accept=".json,.txt,.toml,.lock,.sum,.yaml,.yml,.xml,.gradle,.swift"
+              className="hidden"
+              id="asset-import-file"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file || !companyId) return;
+                importAssets.mutate(
+                  { companyId, file },
+                  {
+                    onSuccess: (res) => {
+                      const msg = `Imported ${res.created} assets, ${res.skipped_duplicate} skipped (duplicates)`;
+                      toast.success(msg);
+                      if (res.errors?.length) {
+                        toast.error(res.errors.slice(0, 3).join("; "));
+                      }
+                    },
+                    onError: (err) => toast.error(err instanceof Error ? err.message : "Import failed"),
+                  }
+                );
+                e.target.value = "";
+              }}
+            />
+            <label
+              htmlFor="asset-import-file"
+              className="cursor-pointer rounded border border-slate-600 bg-slate-800/60 px-3 py-2 text-sm text-slate-200 hover:bg-slate-700/60"
+            >
+              {importAssets.isPending ? "Importing..." : "Choose file"}
+            </label>
+            <span
+              className="cursor-help text-slate-500 hover:text-slate-400 transition-colors"
+              title={SUPPORTED_IMPORT_FILES}
+            >
+              <HelpCircle className="w-3.5 h-3.5 inline" />
+            </span>
+          </div>
           <form
             className="mb-4 grid grid-cols-1 md:grid-cols-5 gap-2"
             onSubmit={(event) => {
@@ -88,9 +146,13 @@ export function AssetsPage() {
                     setName("");
                     setVersion("");
                     setSourceFile("");
+                    toast.success("Asset created");
                   },
-                  onError: (mutationError) =>
-                    setFormError(mutationError instanceof Error ? mutationError.message : "Failed to create asset."),
+                  onError: (mutationError) => {
+                    const msg = mutationError instanceof Error ? mutationError.message : "Failed to create asset.";
+                    setFormError(msg);
+                    toast.error(msg);
+                  },
                 }
               );
             }}
@@ -130,6 +192,10 @@ export function AssetsPage() {
               {createAsset.isPending ? "Creating..." : "Add asset"}
             </button>
           </form>
+          </>
+        ) : null}
+        {companyId && !canMutate ? (
+          <p className="mb-2 text-sm text-slate-400">Viewer role: you cannot create or delete assets.</p>
         ) : null}
         {formError ? <p className="mb-2 text-sm text-red-300">{formError}</p> : null}
         {error ? <p className="text-sm text-red-300">{(error as Error).message}</p> : null}

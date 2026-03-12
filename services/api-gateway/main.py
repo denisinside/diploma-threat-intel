@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from core.config import settings
 from database.mongo import init_mongodb, ensure_indexes
 from database.elastic import init_elasticsearch, close_elasticsearch
+from messaging.rabbitmq import RabbitMQPublisher
 from api.v1.vulns_router import router as vulns_router
 from api.v1.assets_router import router as assets_router
 from api.v1.subscriptions_router import router as subscriptions_router
@@ -26,10 +27,16 @@ async def lifespan(app: FastAPI):
         settings.MONGODB_DB_NAME,
     )
     app.elasticsearch = init_elasticsearch(settings.ELASTICSEARCH_HOSTS)
+    app.rabbitmq = RabbitMQPublisher(
+        settings.RABBITMQ_URL,
+        exchange_name=settings.RABBITMQ_NOTIFICATIONS_EXCHANGE,
+    )
+    await app.rabbitmq.connect()
     await ensure_indexes(app.mongodb)
     yield
     app.mongodb_client.close()
     await close_elasticsearch(app.elasticsearch)
+    await app.rabbitmq.close()
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(

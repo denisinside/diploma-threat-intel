@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "@/lib/toast";
 import { tasksApi } from "./api";
 
 export function useScanStatus() {
@@ -15,6 +16,8 @@ export function useTriggerScan() {
     mutationFn: tasksApi.triggerScan,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["scan-status"] });
+      toast.success("Scan triggered");
     },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed to trigger scan"),
   });
 }

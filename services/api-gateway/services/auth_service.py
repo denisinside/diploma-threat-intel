@@ -8,6 +8,17 @@ from core.security import hash_password, verify_password, create_access_token
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from fastapi import HTTPException
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
+
+from loguru import logger
+from shared.models.notification_event import (
+    NotificationEvent,
+    NotificationEventType,
+    NotificationSeverity,
+)
+
+if TYPE_CHECKING:
+    from messaging.rabbitmq import RabbitMQPublisher
 
 
 async def register_company(db: AsyncIOMotorDatabase, request: RegisterCompanyRequest) -> dict:
@@ -104,12 +115,32 @@ async def reset_password(db: AsyncIOMotorDatabase, request: ResetPasswordRequest
     return {"message": "Password reset successfully", "success": True}
 
 
-async def forgot_password(db: AsyncIOMotorDatabase, request: ForgotPasswordRequest) -> dict:
+async def forgot_password(
+    db: AsyncIOMotorDatabase,
+    request: ForgotPasswordRequest,
+    rabbitmq_publisher: "RabbitMQPublisher | None" = None,
+) -> dict:
     """Initiate password reset flow (stub - would send email in production)"""
     user = await users_repo.get_user_by_email(db, request.email)
     response = {"message": "If the email exists, a reset link has been sent", "success": True};
     if not user:
         return response
 
-    # TODO: send password reset email via notification service
+    if rabbitmq_publisher:
+        event = NotificationEvent(
+            event_type=NotificationEventType.AUTH_PASSWORD_RESET_REQUESTED,
+            source="api-gateway",
+            severity=NotificationSeverity.INFO,
+            company_scope=[user["company_id"]] if user.get("company_id") else None,
+            data={
+                "user_id": user.get("_id"),
+                "email": user.get("email"),
+                "full_name": user.get("full_name"),
+            },
+        )
+        try:
+            await rabbitmq_publisher.publish_event(event)
+        except Exception as exc:
+            logger.warning(f"Failed to publish auth.password_reset_requested event: {exc}")
+
     return response

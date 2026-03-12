@@ -32,6 +32,157 @@ async def get_ecosystems(db: AsyncIOMotorDatabase) -> List[str]:
 async def get_ecosystem_packages(db: AsyncIOMotorDatabase, ecosystem: str) -> List[str]:
     return await mongo.distinct(db, collection, "affected.package.name", {"affected": {"$elemMatch": {"package.ecosystem": ecosystem}}})
 
+async def count_all(db: AsyncIOMotorDatabase) -> int:
+    """Total vulnerability count in MongoDB"""
+    return await db[collection].count_documents({})
+
+
+async def get_stats_aggregation(db: AsyncIOMotorDatabase) -> dict:
+    """Get severity, CVSS, by_year stats from MongoDB (all vulns)"""
+    # #region agent log
+    try:
+        import json
+        docs_with_cvss = await db[collection].count_documents({"database_specific.cvss_severities": {"$exists": True, "$ne": None}})
+        sample_with_cvss = await db[collection].find_one({"database_specific.cvss_severities": {"$exists": True}}, {"id": 1, "database_specific.cvss_severities": 1})
+        with open("debug-6e8087.log", "a", encoding="utf-8") as f:
+            f.write(json.dumps({"hypothesisId": "A", "location": "vulns_repo.py:get_stats_cvss_count", "message": "Docs with cvss_severities", "data": {"count": docs_with_cvss, "sample_id": sample_with_cvss.get("id") if sample_with_cvss else None, "sample_cvss": str(sample_with_cvss.get("database_specific", {}).get("cvss_severities", ""))[:300] if sample_with_cvss else None}, "timestamp": __import__("time").time() * 1000}) + "\n")
+    except Exception as e:
+        try:
+            with open("debug-6e8087.log", "a", encoding="utf-8") as f:
+                f.write(json.dumps({"hypothesisId": "A", "location": "vulns_repo.py:get_stats_cvss_count", "message": "Error", "data": {"error": str(e)}, "timestamp": __import__("time").time() * 1000}) + "\n")
+        except Exception:
+            pass
+    # #endregion
+    pipeline = [
+        {"$facet": {
+            "severity": [
+                {"$match": {"database_specific.severity": {"$exists": True, "$ne": None}}},
+                {"$group": {"_id": "$database_specific.severity", "count": {"$sum": 1}}},
+                {"$sort": {"count": -1}},
+            ],
+            "cvss": [
+                {"$addFields": {
+                    "cvss_score": {
+                        "$ifNull": [
+                            {"$convert": {"input": "$database_specific.cvss_severities.cvvs_3.score", "to": "double", "onError": None}},
+                            {"$convert": {"input": "$database_specific.cvss_severities.cvvs_4.score", "to": "double", "onError": None}},
+                            {
+                                "$let": {
+                                    "vars": {
+                                        "sev": {"$arrayElemAt": [
+                                            {"$filter": {
+                                                "input": {"$ifNull": ["$severity", []]},
+                                                "as": "s",
+                                                "cond": {"$in": ["$$s.type", ["CVSS_V3", "CVSS_V4"]]}
+                                            }},
+                                            0
+                                        ]}
+                                    },
+                                    "in": {"$cond": [
+                                        {"$and": [
+                                            {"$ne": ["$$sev", None]},
+                                            {"$ne": ["$$sev.score", None]}
+                                        ]},
+                                        {"$convert": {"input": "$$sev.score", "to": "double", "onError": None}},
+                                        None
+                                    ]}
+                                }
+                            }
+                        ]
+                }}},
+                {"$match": {"cvss_score": {"$exists": True, "$type": "number"}}},
+                {"$bucket": {
+                    "groupBy": "$cvss_score",
+                    "boundaries": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+                    "default": "other",
+                    "output": {"count": {"$sum": 1}},
+                }},
+            ],
+            "by_year": [
+                {"$match": {"$or": [{"published": {"$exists": True, "$ne": None}}, {"modified": {"$exists": True, "$ne": None}}]}},
+                {"$addFields": {
+                    "pub_date": {"$toDate": {"$ifNull": ["$published", "$modified"]}}
+                }},
+                {"$group": {"_id": {"$year": "$pub_date"}, "count": {"$sum": 1}}},
+                {"$sort": {"_id": 1}},
+            ],
+            "total": [{"$count": "value"}],
+        }},
+    ]
+    cursor = db[collection].aggregate(pipeline)
+    results = await cursor.to_list(length=1)
+    if not results:
+        return {"severity_distribution": [], "cvss_distribution": [], "by_year": [], "total": 0}
+    facet = results[0]
+
+    # #region agent log
+    try:
+        import json
+        cvss_count = sum(b.get("count", 0) for b in facet.get("cvss", []) if b.get("_id") != "other")
+        with open("debug-6e8087.log", "a", encoding="utf-8") as f:
+            f.write(json.dumps({"hypothesisId": "A", "location": "vulns_repo.py:get_stats_aggregation", "message": "MongoDB stats facet", "data": {"cvss_buckets": facet.get("cvss", []), "cvss_total_docs": cvss_count, "severity_buckets": facet.get("severity", [])[:5], "total": facet.get("total", [{}])[0].get("value", 0)}, "timestamp": __import__("time").time() * 1000}) + "\n")
+    except Exception:
+        pass
+    # #endregion
+
+    severity_order = ["CRITICAL", "HIGH", "MODERATE", "LOW"]
+    severity_buckets = facet.get("severity", [])
+    severity_map = {b["_id"]: b["count"] for b in severity_buckets}
+    severity_distribution = [
+        {"name": s, "value": severity_map.get(s, 0)}
+        for s in severity_order
+        if severity_map.get(s, 0) > 0
+    ]
+    for b in severity_buckets:
+        if b["_id"] not in severity_order:
+            severity_distribution.append({"name": str(b["_id"]), "value": b["count"]})
+
+    cvss_buckets = facet.get("cvss", [])
+    cvss_map = {}
+    for b in cvss_buckets:
+        bid = b.get("_id")
+        if bid != "other" and isinstance(bid, (int, float)):
+            cvss_map[int(bid)] = b.get("count", 0)
+    cvss_distribution = [
+        {"range": f"{i}-{i+1}", "value": cvss_map.get(i, 0)}
+        for i in range(9)
+    ] + [{"range": "9+", "value": sum(cvss_map.get(k, 0) for k in range(9, 20))}]
+
+    by_year = [
+        {"year": str(b["_id"]), "value": b["count"]}
+        for b in facet.get("by_year", [])
+    ]
+
+    total_val = facet.get("total", [{}])[0].get("value", 0) if facet.get("total") else 0
+
+    return {
+        "severity_distribution": severity_distribution,
+        "cvss_distribution": cvss_distribution,
+        "by_year": by_year,
+        "total": total_val,
+    }
+
+
+async def search_packages_by_prefix(
+    db: AsyncIOMotorDatabase, prefix: str, limit: int = 20,
+) -> List[dict]:
+    """Search packages by prefix, sorted by vuln count descending"""
+    if not prefix or len(prefix.strip()) < 2:
+        return []
+    import re
+    pattern = re.escape(prefix.strip())
+    pipeline = [
+        {"$unwind": "$affected"},
+        {"$match": {"affected.package.name": {"$regex": f"^{pattern}", "$options": "i"}}},
+        {"$group": {"_id": "$affected.package.name", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+        {"$limit": limit},
+        {"$project": {"name": "$_id", "count": 1, "_id": 0}},
+    ]
+    cursor = db[collection].aggregate(pipeline)
+    return await cursor.to_list(length=limit)
+
+
 async def get_vulnerabilities_by_package(
     db: AsyncIOMotorDatabase, package: str, skip: int = 0, limit: int = 0,
 ) -> List[OSVVulnerability]:
@@ -39,3 +190,28 @@ async def get_vulnerabilities_by_package(
         db, collection, {"affected": {"$elemMatch": {"package.name": package}}},
         skip=skip, limit=limit,
     )
+
+
+async def get_vulnerabilities_by_ticket_ids(
+    db: AsyncIOMotorDatabase, vulnerability_ids: List[str],
+) -> List[dict]:
+    if not vulnerability_ids:
+        return []
+    query = {
+        "$or": [
+            {"id": {"$in": vulnerability_ids}},
+            {"aliases": {"$in": vulnerability_ids}},
+        ]
+    }
+    projection = {
+        "_id": 0,
+        "id": 1,
+        "aliases": 1,
+        "affected.package.name": 1,
+        "severity": 1,
+        "database_specific.severity": 1,
+        "database_specific.epss.percentage": 1,
+        "database_specific.cvss_severities.cvvs_3.score": 1,
+        "database_specific.cvss_severities.cvvs_4.score": 1,
+    }
+    return await db[collection].find(query, projection).to_list(None)
