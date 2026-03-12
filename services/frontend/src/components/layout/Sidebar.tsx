@@ -58,10 +58,12 @@ export function Sidebar() {
   return (
     <aside className="w-56 flex-shrink-0 glass-panel border-r border-slate-700/50 flex flex-col">
       <div className="p-4 border-b border-slate-700/50">
-        <h1 className="text-xs font-semibold text-slate-400 tracking-wider">
-          THREAT INTELLIGENCE
+        <h1 className="text-xs font-semibold text-tactical-sky tracking-[0.2em]">
+          C.L.E.A.R.
         </h1>
-        <p className="text-sm font-medium text-slate-200">Monitoring System</p>
+        <p className="text-xs text-slate-400 mt-0.5 leading-tight">
+          Corporate Leak & Exploit Alert Radar
+        </p>
       </div>
       <nav className="flex-1 p-2 space-y-0.5">
         {navItems.map(({ to, icon: Icon, label }) => (

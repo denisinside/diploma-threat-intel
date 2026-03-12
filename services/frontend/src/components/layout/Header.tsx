@@ -6,8 +6,7 @@ export function Header() {
 
   return (
     <header className="h-14 flex-shrink-0 glass-panel border-b border-slate-700/50 flex items-center justify-between px-6">
-      <h2 className="text-lg font-semibold text-slate-200">
-        Threat Intelligence Monitoring System
+      <h2 className="text-lg font-semibold text-slate-200 tracking-wide">
       </h2>
       <div className="flex items-center gap-4">
         <button

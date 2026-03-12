@@ -127,18 +127,18 @@ def _strip_version_spec(spec: str) -> str | None:
 
 
 def parse_requirements_txt(content: str, filename: str = "requirements.txt") -> list[dict[str, str]]:
-    """Parse requirements.txt. Handles package==1.0, package>=1.0, -r other.txt."""
+    """Parse requirements.txt. Handles package==1.0, package>=1.0, package~=1.0, -r other.txt."""
     result: list[dict[str, str]] = []
     seen: set[str] = set()
     for line in content.splitlines():
         line = line.split("#")[0].strip()
         if not line or line.startswith("-") or line.startswith("["):
             continue
-        # package==1.0.0 or package>=1.0 or package
-        m = re.match(r"^([a-zA-Z0-9_-]+)\s*([=<>!~]+)\s*([\w.]+)", line)
+        # package==1.0.0, package>=1.0, package~=1.0, package, etc.
+        m = re.match(r"^([a-zA-Z0-9_-]+)\s*([=<>!~]+)\s*([\w.+-]+)", line)
         if m:
             name, op, ver = m.group(1), m.group(2), m.group(3)
-            version = ver if "==" in op else None
+            version = ver  # extract version from ==, >=, <=, ~=, etc.
         else:
             m2 = re.match(r"^([a-zA-Z0-9_-]+)", line)
             if m2:

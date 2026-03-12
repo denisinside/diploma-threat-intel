@@ -20,6 +20,8 @@ export const assetsApi = {
     type: "domain" | "ip_address" | "repository" | "library";
     source_file?: string;
   }) => apiClient.post<Asset>("/assets", payload),
+  updateAsset: (assetId: string, payload: { name?: string; version?: string; type?: Asset["type"]; is_active?: boolean; source_file?: string }) =>
+    apiClient.put<Asset>(`/assets/${assetId}`, payload),
   deleteAsset: (assetId: string) => apiClient.delete<{ message: string }>(`/assets/${assetId}`),
   importFromFile: (companyId: string, file: File) =>
     apiUpload<ImportResult>(`/assets/import?company_id=${encodeURIComponent(companyId)}`, file),

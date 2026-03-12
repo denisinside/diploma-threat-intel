@@ -68,9 +68,10 @@ export function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-950 p-4">
       <div className="glass-panel w-full max-w-md p-8">
-        <h1 className="text-xl font-semibold text-slate-100 mb-6">
-          Threat Intelligence Monitoring System
+        <h1 className="text-xl font-semibold text-slate-100 mb-1">
+          C.L.E.A.R.
         </h1>
+        <p className="text-sm text-slate-400 mb-6">Corporate Leak & Exploit Alert Radar</p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="email" className="block text-sm text-slate-400 mb-1">

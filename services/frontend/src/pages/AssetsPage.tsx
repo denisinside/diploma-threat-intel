@@ -4,7 +4,7 @@ import { DataTable } from "@/components/ui/DataTable";
 import { SectionCard } from "@/components/ui/SectionCard";
 import { StatCard } from "@/components/ui/StatCard";
 import { HelpCircle } from "lucide-react";
-import { useAssets, useCreateAsset, useDeleteAsset, useImportAssets } from "@/features/assets/hooks";
+import { useAssets, useCreateAsset, useDeleteAsset, useImportAssets, useUpdateAsset } from "@/features/assets/hooks";
 import { useAuth } from "@/hooks/useAuth";
 import { useCanMutate } from "@/hooks/useRoleGuard";
 import { toast } from "@/lib/toast";
@@ -19,6 +19,7 @@ export function AssetsPage() {
   const canMutate = useCanMutate();
   const { data: assets = [], isLoading, error } = useAssets(companyId);
   const createAsset = useCreateAsset();
+  const updateAsset = useUpdateAsset();
   const deleteAsset = useDeleteAsset();
   const importAssets = useImportAssets();
   const [name, setName] = useState("");
@@ -26,6 +27,7 @@ export function AssetsPage() {
   const [version, setVersion] = useState("");
   const [sourceFile, setSourceFile] = useState("");
   const [formError, setFormError] = useState("");
+  const [selectedAssets, setSelectedAssets] = useState<Asset[]>([]);
 
   const columns = useMemo<Array<ColumnDef<Asset>>>(
     () => [
@@ -34,6 +36,7 @@ export function AssetsPage() {
       { header: "Version", accessorKey: "version" },
       {
         header: "Status",
+        accessorFn: (row) => (row.is_active ? "active" : "inactive"),
         cell: ({ row }) =>
           row.original.is_active ? (
             <span className="text-emerald-300">active</span>
@@ -46,24 +49,39 @@ export function AssetsPage() {
         ? [
             {
               header: "Actions",
+              enableSorting: false,
               cell: ({ row }: { row: { original: Asset } }) => (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (window.confirm("Delete this asset?")) {
-                      deleteAsset.mutate(row.original._id);
-                    }
-                  }}
-                  className="text-red-300 hover:text-red-200 text-xs"
-                >
-                  delete
-                </button>
+                <span className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const action = row.original.is_active ? "deactivate" : "activate";
+                      if (window.confirm(`${action.charAt(0).toUpperCase() + action.slice(1)} this asset?`)) {
+                        updateAsset.mutate({ assetId: row.original._id, payload: { is_active: !row.original.is_active } });
+                      }
+                    }}
+                    className="text-amber-300 hover:text-amber-200 text-xs"
+                  >
+                    {row.original.is_active ? "deactivate" : "activate"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm("Delete this asset?")) {
+                        deleteAsset.mutate(row.original._id);
+                      }
+                    }}
+                    className="text-red-300 hover:text-red-200 text-xs"
+                  >
+                    delete
+                  </button>
+                </span>
               ),
             } as ColumnDef<Asset>,
           ]
         : []),
     ],
-    [deleteAsset, canMutate]
+    [updateAsset, deleteAsset, canMutate]
   );
 
   const activeCount = assets.filter((asset) => asset.is_active).length;
@@ -138,8 +156,8 @@ export function AssetsPage() {
                   company_id: companyId,
                   name: name.trim(),
                   type,
-                  version: version.trim() || undefined,
-                  source_file: sourceFile.trim() || undefined,
+                  version: type === "library" ? version.trim() || undefined : undefined,
+                  source_file: type === "library" ? sourceFile.trim() || undefined : undefined,
                 },
                 {
                   onSuccess: () => {
@@ -157,12 +175,6 @@ export function AssetsPage() {
               );
             }}
           >
-            <input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="Asset name"
-              className="bg-slate-800/60 border border-slate-600 rounded px-3 py-2 text-sm"
-            />
             <select
               value={type}
               onChange={(event) => setType(event.target.value as Asset["type"])}
@@ -174,17 +186,27 @@ export function AssetsPage() {
               <option value="library">library</option>
             </select>
             <input
-              value={version}
-              onChange={(event) => setVersion(event.target.value)}
-              placeholder="Version"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Asset name"
               className="bg-slate-800/60 border border-slate-600 rounded px-3 py-2 text-sm"
             />
-            <input
-              value={sourceFile}
-              onChange={(event) => setSourceFile(event.target.value)}
-              placeholder="Source file"
-              className="bg-slate-800/60 border border-slate-600 rounded px-3 py-2 text-sm"
-            />
+            {type === "library" ? (
+              <>
+                <input
+                  value={version}
+                  onChange={(event) => setVersion(event.target.value)}
+                  placeholder="Version"
+                  className="bg-slate-800/60 border border-slate-600 rounded px-3 py-2 text-sm"
+                />
+                <input
+                  value={sourceFile}
+                  onChange={(event) => setSourceFile(event.target.value)}
+                  placeholder="Source file"
+                  className="bg-slate-800/60 border border-slate-600 rounded px-3 py-2 text-sm"
+                />
+              </>
+            ) : null}
             <button
               type="submit"
               className="rounded border border-tactical-sky/40 text-tactical-sky hover:bg-tactical-sky/15 text-sm px-3 py-2"
@@ -199,10 +221,67 @@ export function AssetsPage() {
         ) : null}
         {formError ? <p className="mb-2 text-sm text-red-300">{formError}</p> : null}
         {error ? <p className="text-sm text-red-300">{(error as Error).message}</p> : null}
+        {canMutate && selectedAssets.length > 0 ? (
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <span className="text-sm text-slate-400">{selectedAssets.length} selected</span>
+            <button
+              type="button"
+              onClick={() => {
+                selectedAssets.filter((a) => a.is_active).forEach((a) =>
+                  updateAsset.mutate({ assetId: a._id, payload: { is_active: false } })
+                );
+                setSelectedAssets([]);
+              }}
+              className="text-xs px-2 py-1 rounded border border-amber-500/50 text-amber-300 hover:bg-amber-500/15"
+            >
+              Deactivate
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                selectedAssets.filter((a) => !a.is_active).forEach((a) =>
+                  updateAsset.mutate({ assetId: a._id, payload: { is_active: true } })
+                );
+                setSelectedAssets([]);
+              }}
+              className="text-xs px-2 py-1 rounded border border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/15"
+            >
+              Activate
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm(`Delete ${selectedAssets.length} asset(s)?`)) {
+                  selectedAssets.forEach((a) => deleteAsset.mutate(a._id));
+                  setSelectedAssets([]);
+                }
+              }}
+              className="text-xs px-2 py-1 rounded border border-red-500/50 text-red-300 hover:bg-red-500/15"
+            >
+              Delete selected
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedAssets([])}
+              className="text-xs text-slate-400 hover:text-slate-300"
+            >
+              Clear
+            </button>
+          </div>
+        ) : null}
         {isLoading ? (
           <p className="text-slate-400">Loading...</p>
         ) : (
-          <DataTable data={assets} columns={columns} emptyText="No assets for this company." />
+          <DataTable
+            data={assets}
+            columns={columns}
+            emptyText="No assets for this company."
+            enableRowSelection={canMutate}
+            getRowId={(row) => row._id}
+            rowSelection={Object.fromEntries(selectedAssets.map((a) => [a._id, true]))}
+            onRowSelectionChange={setSelectedAssets}
+            pageSize={100}
+          />
         )}
       </SectionCard>
 

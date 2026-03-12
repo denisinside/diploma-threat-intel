@@ -11,7 +11,9 @@ import {
   useSubscriptions,
   useTestChannel,
   useUpdateChannel,
+  useUpdateSubscription,
 } from "@/features/subscriptions/hooks";
+import { EditSubscriptionModal } from "@/features/subscriptions/EditSubscriptionModal";
 import { useAuth } from "@/hooks/useAuth";
 import { useCanMutate } from "@/hooks/useRoleGuard";
 import { SeverityBadge } from "@/components/ui/SeverityBadge";
@@ -43,7 +45,11 @@ export function SubscriptionsPage() {
   const [configSignalNumber, setConfigSignalNumber] = useState("");
   const [configSignalRecipients, setConfigSignalRecipients] = useState("");
   const [uiError, setUiError] = useState("");
+  const [editSub, setEditSub] = useState<Subscription | null>(null);
+  const [selectedSubs, setSelectedSubs] = useState<Subscription[]>([]);
+  const [bulkSeverity, setBulkSeverity] = useState<Subscription["min_severity"]>("low");
   const createSubscription = useCreateSubscription();
+  const updateSubscription = useUpdateSubscription();
   const createChannel = useCreateChannel();
   const updateChannel = useUpdateChannel();
   const deleteChannel = useDeleteChannel();
@@ -59,24 +65,48 @@ export function SubscriptionsPage() {
       { header: "Keyword", accessorKey: "keyword" },
       {
         header: "Min Severity",
-        cell: ({ row }) => <SeverityBadge severity={row.original.min_severity} />,
+        accessorFn: (row) => (row.sub_type === "vulnerability" ? row.min_severity ?? "low" : "—"),
+        sortFn: (rowA, rowB) => {
+          const order: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, unknown: 4 };
+          const a = rowA.original.sub_type === "vulnerability" ? rowA.original.min_severity ?? "low" : null;
+          const b = rowB.original.sub_type === "vulnerability" ? rowB.original.min_severity ?? "low" : null;
+          const valA = a == null ? 999 : (order[a] ?? 999);
+          const valB = b == null ? 999 : (order[b] ?? 999);
+          return valA - valB;
+        },
+        cell: ({ row }) =>
+          row.original.sub_type === "vulnerability" ? (
+            <SeverityBadge severity={row.original.min_severity} />
+          ) : (
+            <span className="text-slate-500">—</span>
+          ),
       },
       ...(canMutate
         ? [
             {
               header: "Actions",
+              enableSorting: false,
               cell: ({ row }: { row: { original: Subscription } }) => (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (window.confirm("Delete this subscription rule?")) {
-                      deleteSubscription.mutate(row.original._id);
-                    }
-                  }}
-                  className="text-xs text-red-300 hover:text-red-200"
-                >
-                  delete
-                </button>
+                <span className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditSub(row.original)}
+                    className="text-xs text-tactical-sky hover:text-sky-200"
+                  >
+                    edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm("Delete this subscription rule?")) {
+                        deleteSubscription.mutate(row.original._id);
+                      }
+                    }}
+                    className="text-xs text-red-300 hover:text-red-200"
+                  >
+                    delete
+                  </button>
+                </span>
               ),
             } as ColumnDef<Subscription>,
           ]
@@ -269,7 +299,7 @@ export function SubscriptionsPage() {
                   company_id: companyId,
                   sub_type: subType,
                   keyword: keyword.trim(),
-                  min_severity: minSeverity,
+                  min_severity: subType === "vulnerability" ? minSeverity : "low",
                 },
                 {
                   onSuccess: () => setKeyword(""),
@@ -295,17 +325,19 @@ export function SubscriptionsPage() {
               placeholder="Keyword (domain/package/CVE)"
               className="bg-slate-800/60 border border-slate-600 rounded px-3 py-2 text-sm"
             />
-            <select
-              value={minSeverity}
-              onChange={(event) => setMinSeverity(event.target.value as Subscription["min_severity"])}
-              className="bg-slate-800/60 border border-slate-600 rounded px-3 py-2 text-sm"
-            >
-              <option value="critical">critical</option>
-              <option value="high">high</option>
-              <option value="medium">medium</option>
-              <option value="low">low</option>
-              <option value="unknown">unknown</option>
-            </select>
+            {subType === "vulnerability" ? (
+              <select
+                value={minSeverity}
+                onChange={(event) => setMinSeverity(event.target.value as Subscription["min_severity"])}
+                className="bg-slate-800/60 border border-slate-600 rounded px-3 py-2 text-sm"
+              >
+                <option value="critical">critical</option>
+                <option value="high">high</option>
+                <option value="medium">medium</option>
+                <option value="low">low</option>
+                <option value="unknown">unknown</option>
+              </select>
+            ) : null}
             <button
               type="submit"
               className="rounded border border-tactical-sky/40 text-tactical-sky hover:bg-tactical-sky/15 text-sm px-3 py-2"
@@ -454,8 +486,67 @@ export function SubscriptionsPage() {
         {!canMutate && companyId ? (
           <p className="mb-2 text-sm text-slate-400">Viewer role: you cannot create, edit, or delete.</p>
         ) : null}
+        {tab === "subscriptions" && canMutate && selectedSubs.length > 0 ? (
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <span className="text-sm text-slate-400">{selectedSubs.length} selected</span>
+            {selectedSubs.some((s) => s.sub_type === "vulnerability") && (
+              <>
+                <select
+                  value={bulkSeverity}
+                  onChange={(e) => setBulkSeverity(e.target.value as Subscription["min_severity"])}
+                  className="bg-slate-800/60 border border-slate-600 rounded px-2 py-1 text-sm"
+                >
+                  {(["critical", "high", "medium", "low", "unknown"] as const).map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const vulnOnly = selectedSubs.filter((s) => s.sub_type === "vulnerability");
+                    vulnOnly.forEach((s) =>
+                      updateSubscription.mutate({ subId: s._id, payload: { min_severity: bulkSeverity } })
+                    );
+                    setSelectedSubs([]);
+                  }}
+                  className="text-xs px-2 py-1 rounded border border-amber-500/50 text-amber-300 hover:bg-amber-500/15"
+                >
+                  Set severity
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm(`Delete ${selectedSubs.length} subscription(s)?`)) {
+                  selectedSubs.forEach((s) => deleteSubscription.mutate(s._id));
+                  setSelectedSubs([]);
+                }
+              }}
+              className="text-xs px-2 py-1 rounded border border-red-500/50 text-red-300 hover:bg-red-500/15"
+            >
+              Delete selected
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedSubs([])}
+              className="text-xs text-slate-400 hover:text-slate-300"
+            >
+              Clear
+            </button>
+          </div>
+        ) : null}
         {tab === "subscriptions" ? (
-          <DataTable data={subscriptions} columns={subColumns} emptyText="No subscription rules." />
+          <DataTable
+            data={subscriptions}
+            columns={subColumns}
+            emptyText="No subscription rules."
+            enableRowSelection={canMutate}
+            getRowId={(row) => row._id}
+            rowSelection={Object.fromEntries(selectedSubs.map((s) => [s._id, true]))}
+            onRowSelectionChange={setSelectedSubs}
+            pageSize={100}
+          />
         ) : (
           <DataTable data={channels} columns={channelColumns} emptyText="No channels configured." />
         )}
@@ -466,6 +557,16 @@ export function SubscriptionsPage() {
           Your account has no `company_id`, so company-scoped subscriptions are unavailable.
         </p>
       ) : null}
+
+      <EditSubscriptionModal
+        open={!!editSub}
+        onOpenChange={(open) => !open && setEditSub(null)}
+        subscription={editSub}
+        onSave={(subId, payload) =>
+          updateSubscription.mutate({ subId, payload }, { onSuccess: () => setEditSub(null) })
+        }
+        isPending={updateSubscription.isPending}
+      />
     </div>
   );
 }

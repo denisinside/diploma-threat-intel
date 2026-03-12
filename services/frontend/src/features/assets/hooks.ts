@@ -15,6 +15,19 @@ export function useCreateAsset() {
     mutationFn: assetsApi.createAsset,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["assets"] });
+      queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
+    },
+  });
+}
+
+export function useUpdateAsset() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ assetId, payload }: { assetId: string; payload: Parameters<typeof assetsApi.updateAsset>[1] }) =>
+      assetsApi.updateAsset(assetId, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["assets"] });
+      queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
     },
   });
 }
@@ -25,6 +38,7 @@ export function useDeleteAsset() {
     mutationFn: assetsApi.deleteAsset,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["assets"] });
+      queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
     },
   });
 }
@@ -36,6 +50,7 @@ export function useImportAssets() {
       assetsApi.importFromFile(companyId, file),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["assets"] });
+      queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
     },
   });
 }

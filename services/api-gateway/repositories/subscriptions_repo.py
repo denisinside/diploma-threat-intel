@@ -35,6 +35,12 @@ async def delete_subscription(db: AsyncIOMotorDatabase, sub_id: str) -> bool:
     return await mongo.delete_one_entity(db, sub_collection, {"_id": ObjectId(sub_id)})
 
 
+async def delete_subscriptions_by_asset_id(db: AsyncIOMotorDatabase, asset_id: str) -> int:
+    """Delete all subscriptions linked to asset. Returns number deleted."""
+    result = await db[sub_collection].delete_many({"asset_id": asset_id})
+    return result.deleted_count
+
+
 # --- Notification Channels ---
 
 async def create_channel(db: AsyncIOMotorDatabase, channel: dict) -> dict:

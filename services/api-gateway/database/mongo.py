@@ -48,6 +48,7 @@ async def ensure_indexes(db: AsyncIOMotorDatabase):
     # --- subscriptions ---
     await db["subscriptions"].create_indexes([
         IndexModel([("company_id", ASCENDING)]),
+        IndexModel([("asset_id", ASCENDING)]),
     ])
 
     # --- notification_channels ---

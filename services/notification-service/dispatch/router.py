@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from loguru import logger
@@ -39,7 +40,7 @@ def dispatch_event(db: Database, event: NotificationEvent) -> int:
         if not channels:
             continue
         message_text = _build_message(event)
-        subject = f"[Threat Intel] {event.event_type.value}"
+        subject = f"[C.L.E.A.R.] {event.event_type.value}"
         for channel in channels:
             try:
                 _send_to_channel(channel, message_text, subject)
@@ -61,7 +62,7 @@ def _dispatch_channel_test(db: Database, event: NotificationEvent) -> int:
         logger.warning(f"channel.test: channel {channel_id} not found or disabled")
         return 0
     message_text = event.data.get("message", _build_message(event))
-    subject = "[Threat Intel] Test notification"
+    subject = "[C.L.E.A.R.] Test notification"
     try:
         _send_to_channel(channel, message_text, subject)
         return 1
@@ -120,12 +121,25 @@ def _is_severity_allowed(event_severity: str, min_severity: str) -> bool:
     return SEVERITY_WEIGHT.get(event_severity, 0) >= SEVERITY_WEIGHT.get(min_severity, 0)
 
 
+def _format_datetime(dt: datetime) -> str:
+    return dt.strftime("%d %b %Y, %H:%M UTC")
+
+
 def _build_message(event: NotificationEvent) -> str:
+    occurred = _format_datetime(event.occurred_at)
+    if event.event_type == NotificationEventType.LEAK_SOURCE_REGISTERED:
+        data = {k: v for k, v in event.data.items() if k not in ("sha256", "metadata")}
+        return (
+            f"Event: {event.event_type.value}\n"
+            f"Source: {event.source}\n"
+            f"Occurred at: {occurred}\n"
+            f"Data: {data}"
+        )
     return (
         f"Event: {event.event_type.value}\n"
         f"Severity: {event.severity.value}\n"
         f"Source: {event.source}\n"
-        f"Occurred at: {event.occurred_at.isoformat()}\n"
+        f"Occurred at: {occurred}\n"
         f"Data: {event.data}"
     )
 

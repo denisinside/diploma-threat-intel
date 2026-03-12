@@ -132,7 +132,7 @@ async def _send_test_direct(channel: dict) -> str | None:
     """Send test message directly and return error string if failed, else None."""
     channel_type = channel.get("channel_type")
     config = channel.get("config") or {}
-    text = "Test notification from Threat Intel platform"
+    text = "Test notification from C.L.E.A.R. platform"
     timeout = 15.0
 
     if channel_type == "telegram":
