@@ -68,13 +68,13 @@ services:
     command: >
       sh -c "pip install -r services/notification-service/requirements.txt && python services/notification-service/main.py"
     environment:
-      - RABBITMQ_URL=${RABBITMQ_URL}
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - MONGODB_URI=mongodb://admin:rootpassword@mongodb:27017/
+      - MONGODB_DB_NAME=${MONGODB_DB_NAME}
       - RABBITMQ_EXCHANGE=notifications.events
       - RABBITMQ_QUEUE=notification_events
       - RABBITMQ_DLQ=notification_events.dlq
       - RABBITMQ_MAX_RETRIES=5
-      - MONGODB_URI=${MONGODB_URI}
-      - MONGODB_DB_NAME=${MONGODB_DB_NAME}
       - SMTP_HOST=${SMTP_HOST}
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_USERNAME=${SMTP_USERNAME}

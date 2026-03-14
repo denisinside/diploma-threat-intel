@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
@@ -34,6 +34,17 @@ def dispatch_event(db: Database, event: NotificationEvent) -> int:
     if event.event_type == NotificationEventType.CHANNEL_TEST:
         return _dispatch_channel_test(db, event)
     company_ids = _resolve_company_ids(db, event)
+    # #region agent log
+    try:
+        import json, os
+        _lp = os.path.join(os.path.dirname(__file__), "..", "..", "..", "debug-09ba45.log")
+        with open(_lp, "a", encoding="utf-8") as _f:
+            _f.write(json.dumps({"hypothesisId":"B","location":"router.py:dispatch_event","message":"company_ids resolved","data":{"event_type":event.event_type.value,"event_id":event.event_id,"company_ids":company_ids,"company_count":len(company_ids)},"timestamp":int(__import__("time").time()*1000)}) + "\n")
+    except Exception:
+        pass
+    # #endregion
+    if event.event_type == NotificationEventType.VULN_DETECTED:
+        _create_tickets_for_matching_vuln(db, event, company_ids)
     delivered = 0
     for company_id in company_ids:
         channels = get_enabled_channels(db, company_id)
@@ -78,8 +89,21 @@ def _resolve_company_ids(db: Database, event: NotificationEvent) -> list[str]:
     companies = db["subscriptions"].distinct("company_id")
     for company_id in companies:
         rules = get_company_subscriptions(db, company_id)
-        if any(_event_matches_rule(event, rule) for rule in rules):
-            result.append(company_id)
+        for rule in rules:
+            matched = _event_matches_rule(event, rule)
+            # #region agent log
+            try:
+                import json, os
+                _lp = os.path.join(os.path.dirname(__file__), "..", "..", "..", "debug-09ba45.log")
+                haystack = " ".join(str(x).lower() for x in [event.data.get("vuln_id"), event.data.get("summary"), event.data.get("aliases"), event.data.get("affected_packages", [])]) if event.event_type.value.startswith("vuln.") else ""
+                with open(_lp, "a", encoding="utf-8") as _f:
+                    _f.write(json.dumps({"hypothesisId":"C","location":"router.py:_resolve_company_ids","message":"rule check","data":{"company_id":company_id,"keyword":str(rule.get("keyword","")),"asset_id":str(rule.get("asset_id","")),"sub_type":rule.get("sub_type"),"matched":matched,"haystack_preview":haystack[:200] if haystack else "","event_type":event.event_type.value},"timestamp":int(__import__("time").time()*1000)}) + "\n")
+            except Exception:
+                pass
+            # #endregion
+            if matched:
+                result.append(company_id)
+                break
     return result
 
 
@@ -110,6 +134,7 @@ def _event_matches_rule(event: NotificationEvent, rule: dict[str, Any]) -> bool:
                 event.data.get("vuln_id"),
                 event.data.get("summary"),
                 event.data.get("aliases"),
+                event.data.get("affected_packages", []),
             ]
         )
         return keyword in haystack
@@ -119,6 +144,50 @@ def _event_matches_rule(event: NotificationEvent, rule: dict[str, Any]) -> bool:
 
 def _is_severity_allowed(event_severity: str, min_severity: str) -> bool:
     return SEVERITY_WEIGHT.get(event_severity, 0) >= SEVERITY_WEIGHT.get(min_severity, 0)
+
+
+def _severity_to_priority(severity: str) -> str:
+    return severity if severity in ("critical", "high", "medium", "low") else "medium"
+
+
+def _create_tickets_for_matching_vuln(
+    db: Database, event: NotificationEvent, company_ids: list[str],
+) -> None:
+    vuln_id = event.data.get("vuln_id")
+    if not vuln_id:
+        return
+    priority = _severity_to_priority(event.severity.value)
+    now = datetime.now(timezone.utc)
+    for company_id in company_ids:
+        rules = get_company_subscriptions(db, company_id)
+        for rule in rules:
+            if not _event_matches_rule(event, rule):
+                continue
+            asset_id = rule.get("asset_id")
+            if not asset_id:
+                continue
+            existing = db["tickets"].find_one({
+                "company_id": company_id,
+                "asset_id": asset_id,
+                "vulnerability_id": vuln_id,
+            })
+            if existing:
+                continue
+            try:
+                db["tickets"].insert_one({
+                    "company_id": company_id,
+                    "asset_id": asset_id,
+                    "vulnerability_id": vuln_id,
+                    "status": "open",
+                    "priority": priority,
+                    "detected_at": now,
+                    "resolved_at": None,
+                    "created_at": now,
+                    "updated_at": now,
+                })
+                logger.info(f"Auto-created ticket company={company_id} asset={asset_id} vuln={vuln_id}")
+            except Exception as exc:
+                logger.warning(f"Failed to create ticket for vuln={vuln_id}: {exc}")
 
 
 def _format_datetime(dt: datetime) -> str:

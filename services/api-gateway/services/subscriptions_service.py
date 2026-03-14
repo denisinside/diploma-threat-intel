@@ -78,15 +78,26 @@ async def get_channel(db: AsyncIOMotorDatabase, channel_id: str) -> dict:
     channel = await subscriptions_repo.get_channel_by_id(db, channel_id)
     if not channel:
         raise HTTPException(status_code=404, detail="Notification channel not found")
-    return channel
+    return _normalize_channel(channel)
+
+
+def _normalize_channel(doc: dict) -> dict:
+    """Ensure channel has expected keys for API response (handles legacy/migrated data)."""
+    return {
+        **doc,
+        "name": doc.get("name") or doc.get("channel_name") or "",
+        "channel_type": doc.get("channel_type") or "",
+        "config": doc.get("config") if doc.get("config") is not None else {},
+    }
 
 
 async def get_company_channels(
     db: AsyncIOMotorDatabase, company_id: str, skip: int = 0, limit: int = 0,
 ) -> List[dict]:
-    return await subscriptions_repo.get_channels_by_company(
+    channels = await subscriptions_repo.get_channels_by_company(
         db, company_id, skip=skip, limit=limit,
     )
+    return [_normalize_channel(c) for c in channels]
 
 
 async def update_channel(

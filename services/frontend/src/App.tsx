@@ -1,6 +1,9 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Layout } from "@/components/layout/Layout";
 import { LoginPage } from "@/pages/auth/LoginPage";
+import { RegisterCompanyRequestPage } from "@/pages/auth/RegisterCompanyRequestPage";
+import { AdminCompanyRequestsPage } from "@/pages/AdminCompanyRequestsPage";
+import { TeamPage } from "@/pages/TeamPage";
 import { OverviewPage } from "@/pages/OverviewPage";
 import { AssetsPage } from "@/pages/AssetsPage";
 import { LeaksPage } from "@/pages/LeaksPage";
@@ -17,6 +20,7 @@ function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/register-company-request" element={<RegisterCompanyRequestPage />} />
       <Route
         path="/"
         element={
@@ -35,6 +39,8 @@ function App() {
         <Route path="vulnerabilities" element={<VulnerabilitiesPage />} />
         <Route path="tickets" element={<TicketsPage />} />
         <Route path="subscriptions" element={<SubscriptionsPage />} />
+        <Route path="team" element={<TeamPage />} />
+        <Route path="admin/company-requests" element={<AdminCompanyRequestsPage />} />
         <Route path="settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

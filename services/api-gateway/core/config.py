@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     JWT_SECRET: str
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
+    SUPER_ADMIN_EMAIL: str | None = None
+    SUPER_ADMIN_PASSWORD: str | None = None
+
     model_config = SettingsConfigDict(
         env_file=str(_ENV_PATH),
         extra="ignore",

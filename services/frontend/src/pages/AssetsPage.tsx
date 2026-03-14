@@ -216,9 +216,6 @@ export function AssetsPage() {
           </form>
           </>
         ) : null}
-        {companyId && !canMutate ? (
-          <p className="mb-2 text-sm text-slate-400">Viewer role: you cannot create or delete assets.</p>
-        ) : null}
         {formError ? <p className="mb-2 text-sm text-red-300">{formError}</p> : null}
         {error ? <p className="text-sm text-red-300">{(error as Error).message}</p> : null}
         {canMutate && selectedAssets.length > 0 ? (

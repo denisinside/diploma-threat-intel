@@ -25,6 +25,12 @@ async def ensure_indexes(db: AsyncIOMotorDatabase):
         IndexModel([("domain", ASCENDING)], unique=True),
     ])
 
+    # --- company_registration_requests ---
+    await db["company_registration_requests"].create_indexes([
+        IndexModel([("status", ASCENDING)]),
+        IndexModel([("domain", ASCENDING)]),
+    ])
+
     # --- assets ---
     await db["assets"].create_indexes([
         IndexModel([("company_id", ASCENDING)]),

@@ -5,6 +5,7 @@ import database.elastic as elastic
 from shared.models.OSVVulnerability import OSVVulnerability
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from elasticsearch import AsyncElasticsearch
+from elasticsearch.helpers import async_scan
 from fastapi import HTTPException
 from typing import List, Optional, Any
 from collections import defaultdict
@@ -160,17 +161,8 @@ async def search_vulnerabilities_v2(
         from_=skip,
         sort=sort,
     )
-    # #region agent log
-    if items and total > 0:
-        try:
-            import json
-            first = items[0]
-            ds = first.get("database_specific", {})
-            with open("debug-6e8087.log", "a", encoding="utf-8") as f:
-                f.write(json.dumps({"hypothesisId": "D", "location": "vulns_service.py:search_vulnerabilities_v2", "message": "ES search first item", "data": {"item_id": first.get("id"), "ds_keys": list(ds.keys()) if ds else [], "has_cvss": "cvss_severities" in (ds or {})}, "timestamp": __import__("time").time() * 1000}) + "\n")
-        except Exception:
-            pass
-    # #endregion
+    for item in items:
+        _enrich_cvss_from_severity(item)
     return {"items": items, "total": total}
 
 
@@ -180,6 +172,23 @@ def _extract_cve_id(vuln: dict[str, Any]) -> str:
         if isinstance(alias, str) and alias.upper().startswith("CVE-"):
             return alias
     return str(vuln.get("id", ""))
+
+
+def _score_from_cvss_vector(vector_str: str, cvss_type: str) -> Optional[float]:
+    """Parse CVSS vector string and return base score. Handles CVSS:3.x and CVSS:4.0."""
+    if not vector_str or not isinstance(vector_str, str) or not vector_str.strip().upper().startswith("CVSS:"):
+        return None
+    try:
+        from cvss import CVSS3, CVSS4
+
+        if cvss_type == "CVSS_V4" or "CVSS:4." in vector_str:
+            c = CVSS4(vector_str)
+        else:
+            c = CVSS3(vector_str)
+        scores = c.scores()
+        return float(scores[0]) if scores else None
+    except Exception:
+        return None
 
 
 def _extract_cvss_score(vuln: dict[str, Any]) -> Optional[float]:
@@ -196,16 +205,42 @@ def _extract_cvss_score(vuln: dict[str, Any]) -> Optional[float]:
     for sev in severities:
         if not isinstance(sev, dict):
             continue
-        if sev.get("type") in {"CVSS_V3", "CVSS_V4"}:
-            raw_score = sev.get("score")
-            if isinstance(raw_score, (int, float)):
-                return float(raw_score)
-            if isinstance(raw_score, str):
+        sev_type = sev.get("type", "")
+        raw_score = sev.get("score")
+        if isinstance(raw_score, (int, float)):
+            return float(raw_score)
+        if isinstance(raw_score, str) and raw_score.strip():
+            if raw_score.upper().startswith("CVSS:"):
+                parsed = _score_from_cvss_vector(raw_score, sev_type)
+                if parsed is not None:
+                    return parsed
+            else:
                 try:
                     return float(raw_score.split("/")[0])
                 except Exception:
-                    return None
+                    pass
     return None
+
+
+def _enrich_cvss_from_severity(vuln: dict[str, Any]) -> None:
+    """Populate cvss_severities from root severity[] when cvvs_3/cvvs_4 are None."""
+    dbs = vuln.get("database_specific")
+    if not isinstance(dbs, dict):
+        return
+    cvss = dbs.get("cvss_severities")
+    has_valid_cvss = (
+        cvss
+        and isinstance(cvss, dict)
+        and (
+            (isinstance(cvss.get("cvvs_3"), dict) and cvss.get("cvvs_3", {}).get("score") is not None)
+            or (isinstance(cvss.get("cvvs_4"), dict) and cvss.get("cvvs_4", {}).get("score") is not None)
+        )
+    )
+    if has_valid_cvss:
+        return
+    score = _extract_cvss_score(vuln)
+    if score is not None:
+        dbs["cvss_severities"] = {"cvvs_3": {"score": score, "vector_string": None}, "cvvs_4": None}
 
 
 def _extract_epss(vuln: dict[str, Any]) -> Optional[float]:
@@ -250,6 +285,213 @@ def _age_bucket(days: int) -> str:
     return "90+"
 
 
+async def _fallback_cvss_epss_from_source(
+    es: AsyncElasticsearch,
+    query: dict[str, Any],
+    include_scatter: bool,
+) -> dict[str, Any]:
+    bins = [0] * 10
+    scatter_map: dict[str, int] = defaultdict(int)
+    processed = 0
+    cvss_found = 0
+    epss_found = 0
+
+    async for hit in async_scan(
+        client=es,
+        index=settings.ELASTICSEARCH_INDEX_NAME_VULNERABILITIES,
+        query={
+            "query": query,
+            "_source": [
+                "id",
+                "severity",
+                "database_specific.epss.percentage",
+                "database_specific.cvss_severities.cvvs_3.score",
+                "database_specific.cvss_severities.cvvs_4.score",
+            ],
+        },
+        preserve_order=False,
+        size=1000,
+    ):
+        source = hit.get("_source", {})
+        processed += 1
+        cvss = _extract_cvss_score(source)
+        if cvss is None:
+            continue
+        cvss_found += 1
+        if cvss >= 9:
+            bins[9] += 1
+        else:
+            idx = max(0, min(8, int(cvss)))
+            bins[idx] += 1
+
+        if include_scatter:
+            epss = _extract_epss(source)
+            if epss is None:
+                continue
+            epss_found += 1
+            cvss_bucket = max(0, min(9, int(cvss)))
+            epss_bucket = max(0.0, min(0.95, float(int(epss / 0.05) * 0.05)))
+            scatter_map[f"{cvss_bucket}:{epss_bucket:.2f}"] += 1
+
+    cvss_distribution = [
+        {"range": f"{i}-{i+1}", "value": bins[i]} for i in range(9)
+    ] + [{"range": "9+", "value": bins[9]}]
+
+    scatter_points = []
+    if include_scatter:
+        for key, count in scatter_map.items():
+            cvss_key_s, epss_key_s = key.split(":")
+            cvss_key = float(cvss_key_s)
+            epss_key = float(epss_key_s)
+            scatter_points.append(
+                {
+                    "id": f"{cvss_key}-{epss_key}",
+                    "cvss": round(cvss_key + 0.5, 2),
+                    "epss": round(epss_key + 0.025, 6),
+                    "severity": "UNKNOWN",
+                    "count": count,
+                }
+            )
+
+    return {"cvss_distribution": cvss_distribution, "scatter_points": scatter_points}
+
+
+async def _build_global_vuln_dashboard(
+    es: AsyncElasticsearch,
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    aggs = {
+        "top_assets_nested": {
+            "nested": {"path": "affected"},
+            "aggs": {
+                "top_assets": {
+                    "terms": {
+                        "field": "affected.package.name.keyword",
+                        "size": 10,
+                    }
+                }
+            },
+        },
+        "aging": {
+            "filters": {
+                "filters": {
+                    "0-7": {"range": {"published": {"gte": "now-7d/d"}}},
+                    "8-30": {"range": {"published": {"gte": "now-30d/d", "lt": "now-7d/d"}}},
+                    "31-90": {"range": {"published": {"gte": "now-90d/d", "lt": "now-30d/d"}}},
+                    "90+": {"range": {"published": {"lt": "now-90d/d"}}},
+                }
+            },
+            "aggs": {
+                "severity": {"terms": {"field": "database_specific.severity", "size": 10}},
+            },
+        },
+        "heatmap_recent": {
+            "filter": {"range": {"published": {"gte": "now-30d/d", "lte": "now"}}},
+            "aggs": {
+                "hourly": {
+                    "date_histogram": {"field": "published", "fixed_interval": "1h", "min_doc_count": 1}
+                }
+            },
+        },
+        "scatter_cvss": {
+            "histogram": {"field": "database_specific.cvss_severities.cvvs_3.score", "interval": 1, "min_doc_count": 1},
+            "aggs": {
+                "epss": {"histogram": {"field": "database_specific.epss.percentage", "interval": 0.05, "min_doc_count": 1}}
+            },
+        },
+    }
+    agg = await elastic.search_with_aggregations(
+        es,
+        settings.ELASTICSEARCH_INDEX_NAME_VULNERABILITIES,
+        query,
+        aggs,
+        size=0,
+    )
+
+    top_assets_buckets = (
+        agg.get("top_assets_nested", {}).get("top_assets", {}).get("buckets", [])
+    )
+    top_assets_open_cves = [
+        {"asset": b.get("key"), "count": b.get("doc_count", 0)}
+        for b in top_assets_buckets
+        if b.get("key")
+    ]
+
+    aging_result = []
+    for bucket_name in ["0-7", "8-30", "31-90", "90+"]:
+        severity_buckets = (
+            agg.get("aging", {})
+            .get("buckets", {})
+            .get(bucket_name, {})
+            .get("severity", {})
+            .get("buckets", [])
+        )
+        severity_map = {
+            str(b.get("key", "")).lower(): int(b.get("doc_count", 0))
+            for b in severity_buckets
+        }
+        aging_result.append(
+            {
+                "bucket": bucket_name,
+                "critical": severity_map.get("critical", 0),
+                "high": severity_map.get("high", 0),
+                "moderate": severity_map.get("moderate", 0),
+                "low": severity_map.get("low", 0),
+            }
+        )
+
+    heatmap = []
+    for bucket in (
+        agg.get("heatmap_recent", {}).get("hourly", {}).get("buckets", [])
+    ):
+        key_as_string = bucket.get("key_as_string")
+        if not key_as_string:
+            continue
+        dt = _to_datetime(key_as_string)
+        if not dt:
+            continue
+        weekday = dt.weekday()
+        hour = dt.hour
+        heatmap.append({"weekday": weekday, "hour": hour, "count": int(bucket.get("doc_count", 0))})
+
+    scatter_points = []
+    for cvss_bucket in agg.get("scatter_cvss", {}).get("buckets", []):
+        cvss_key = cvss_bucket.get("key")
+        if cvss_key is None:
+            continue
+        for epss_bucket in cvss_bucket.get("epss", {}).get("buckets", []):
+            epss_key = epss_bucket.get("key")
+            if epss_key is None:
+                continue
+            count = int(epss_bucket.get("doc_count", 0))
+            if count <= 0:
+                continue
+            scatter_points.append(
+                {
+                    "id": f"{cvss_key}-{epss_key}",
+                    "cvss": round(float(cvss_key) + 0.5, 2),
+                    "epss": round(float(epss_key) + 0.025, 6),
+                    "severity": "UNKNOWN",
+                    "count": count,
+                }
+            )
+
+    return {
+        "kpis": {
+            "open_cves": 0,
+            "critical_actionable": 0,
+            "mttr_days": None,
+            "mttr_delta_prev_month_days": None,
+        },
+        "charts": {
+            "top_assets_open_cves": top_assets_open_cves,
+            "aging_by_severity": aging_result,
+            "criticality_vs_exploitability": scatter_points,
+            "heatmap": heatmap,
+        },
+    }
+
+
 async def _build_company_vuln_dashboard(db: Any, company_id: Optional[str]) -> dict[str, Any]:
     empty = {
         "kpis": {
@@ -267,6 +509,7 @@ async def _build_company_vuln_dashboard(db: Any, company_id: Optional[str]) -> d
                 {"bucket": "90+", "critical": 0, "high": 0, "moderate": 0, "low": 0},
             ],
             "criticality_vs_exploitability": [],
+            "heatmap": [],
         },
     }
     if not company_id:
@@ -461,7 +704,8 @@ async def _build_company_vuln_dashboard(db: Any, company_id: Optional[str]) -> d
             ],
             "criticality_vs_exploitability": sorted(
                 scatter_points, key=lambda x: (x["cvss"], x["epss"]), reverse=True
-            )[:300],
+            ),
+            "heatmap": [],
         },
     }
     _cache_set(cache_key, payload)
@@ -505,11 +749,13 @@ async def get_vuln_stats(
     published_to: Optional[str] = None,
     cwe_id: Optional[str] = None,
     severity: Optional[str] = None,
+    chart_scope: str = "company",
 ) -> dict[str, Any]:
     """Get aggregated stats for vulnerabilities matching filters"""
+    chart_scope = "global" if chart_scope == "global" else "company"
     cache_key = (
         "vuln_stats_es::"
-        f"{company_id or 'none'}::{query_text or ''}::{ecosystem or ''}::{package or ''}::"
+        f"{chart_scope}::{company_id or 'none'}::{query_text or ''}::{ecosystem or ''}::{package or ''}::"
         f"{cvss_min if cvss_min is not None else ''}::{cvss_max if cvss_max is not None else ''}::"
         f"{published_from or ''}::{published_to or ''}::{cwe_id or ''}::{severity or ''}"
     )
@@ -579,6 +825,15 @@ async def get_vuln_stats(
         {"range": f"{i}-{i+1}", "value": cvss_map.get(i, 0)}
         for i in range(9)
     ] + [{"range": "9+", "value": sum(cvss_map.get(k, 0) for k in range(9, 20))}]
+    fallback_scatter_points: list[dict[str, Any]] = []
+    if not any(item["value"] > 0 for item in cvss_distribution):
+        fallback = await _fallback_cvss_epss_from_source(
+            es,
+            query,
+            include_scatter=(chart_scope == "global"),
+        )
+        cvss_distribution = fallback["cvss_distribution"]
+        fallback_scatter_points = fallback["scatter_points"]
 
     # By year
     by_year_buckets = agg_result.get("by_year", {}).get("buckets", [])
@@ -590,19 +845,28 @@ async def get_vuln_stats(
     if db is not None:
         mongo_total = await vulns_repo.count_all(db)
 
-    dashboard = await _build_company_vuln_dashboard(db, company_id) if db is not None else {
-        "kpis": {
-            "open_cves": 0,
-            "critical_actionable": 0,
-            "mttr_days": None,
-            "mttr_delta_prev_month_days": None,
-        },
-        "charts": {
-            "top_assets_open_cves": [],
-            "aging_by_severity": [],
-            "criticality_vs_exploitability": [],
-        },
-    }
+    if chart_scope == "global":
+        dashboard = await _build_global_vuln_dashboard(es, query)
+        if (
+            not dashboard.get("charts", {}).get("criticality_vs_exploitability")
+            and fallback_scatter_points
+        ):
+            dashboard["charts"]["criticality_vs_exploitability"] = fallback_scatter_points
+    else:
+        dashboard = await _build_company_vuln_dashboard(db, company_id) if db is not None else {
+            "kpis": {
+                "open_cves": 0,
+                "critical_actionable": 0,
+                "mttr_days": None,
+                "mttr_delta_prev_month_days": None,
+            },
+            "charts": {
+                "top_assets_open_cves": [],
+                "aging_by_severity": [],
+                "criticality_vs_exploitability": [],
+                "heatmap": [],
+            },
+        }
 
     payload = {
         "severity_distribution": severity_distribution,
@@ -627,18 +891,8 @@ async def get_vuln_by_id(db: AsyncIOMotorDatabase, vuln_id: str) -> Optional[dic
         vuln = await vulns_repo.get_vulnerability_by_ghsa_id(db, vuln_id)
     else:
         raise HTTPException(status_code=400, detail="Invalid vulnerability ID (must start with CVE- or GHSA-)")
-    # #region agent log
-    if vuln:
-        try:
-            import json
-            ds = vuln.get("database_specific") if isinstance(vuln, dict) else getattr(vuln, "database_specific", None)
-            cvss_keys = list((ds or {}).keys()) if ds else []
-            has_cvss = bool(ds and (ds.get("cvss_severities") or (isinstance(ds, dict) and ("cvvs_3" in str(ds) or "cvss" in str(ds)))))
-            with open("debug-6e8087.log", "a", encoding="utf-8") as f:
-                f.write(json.dumps({"hypothesisId": "B", "location": "vulns_service.py:get_vuln_by_id", "message": "Vuln database_specific", "data": {"vuln_id": vuln_id, "ds_keys": cvss_keys, "has_cvss_severities": has_cvss, "cvss_severities_sample": str((ds or {}).get("cvss_severities", ""))[:200]}, "timestamp": __import__("time").time() * 1000}) + "\n")
-        except Exception:
-            pass
-    # #endregion
+    if vuln and isinstance(vuln, dict):
+        _enrich_cvss_from_severity(vuln)
     return vuln
 
 

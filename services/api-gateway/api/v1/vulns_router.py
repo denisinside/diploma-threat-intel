@@ -58,6 +58,7 @@ async def get_vulnerability_stats(
     published_to: Optional[str] = Query(None),
     cwe_id: Optional[str] = Query(None),
     severity: Optional[str] = Query(None),
+    chart_scope: str = Query("company", description="Charts scope: company or global"),
 ) -> dict:
     """Get aggregated stats. Use all=true for stats from MongoDB (all vulns). Otherwise ES with filters."""
     if all:
@@ -78,6 +79,7 @@ async def get_vulnerability_stats(
         published_to=published_to,
         cwe_id=cwe_id,
         severity=severity,
+        chart_scope=chart_scope,
     )
 
 

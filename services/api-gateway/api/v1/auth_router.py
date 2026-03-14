@@ -1,12 +1,21 @@
 from fastapi import APIRouter, Request
 from models.requests.auth_requests import (
     RegisterUserRequest, RegisterCompanyRequest,
+    CompanyRegistrationRequest,
     LoginRequest, ResetPasswordRequest, ForgotPasswordRequest,
 )
 from models.responses.common import MessageResponse
 import services.auth_service as auth_service
+import services.company_registration_service as reg_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.post("/company-registration-request")
+async def submit_company_registration_request(body: CompanyRegistrationRequest, request: Request) -> dict:
+    """Public: submit a company registration request (pending super_admin approval)"""
+    db = request.app.mongodb
+    return await reg_service.submit_company_registration_request(db, body.model_dump())
 
 
 @router.post("/register-company")

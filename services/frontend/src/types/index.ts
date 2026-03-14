@@ -148,7 +148,7 @@ export interface UserSession {
   id: string;
   email: string;
   full_name: string;
-  role: "admin" | "analyst" | "viewer";
+  role: "super_admin" | "admin" | "analyst" | "viewer";
   company_id?: string;
 }
 

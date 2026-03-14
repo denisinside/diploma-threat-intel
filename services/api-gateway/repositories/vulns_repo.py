@@ -39,20 +39,6 @@ async def count_all(db: AsyncIOMotorDatabase) -> int:
 
 async def get_stats_aggregation(db: AsyncIOMotorDatabase) -> dict:
     """Get severity, CVSS, by_year stats from MongoDB (all vulns)"""
-    # #region agent log
-    try:
-        import json
-        docs_with_cvss = await db[collection].count_documents({"database_specific.cvss_severities": {"$exists": True, "$ne": None}})
-        sample_with_cvss = await db[collection].find_one({"database_specific.cvss_severities": {"$exists": True}}, {"id": 1, "database_specific.cvss_severities": 1})
-        with open("debug-6e8087.log", "a", encoding="utf-8") as f:
-            f.write(json.dumps({"hypothesisId": "A", "location": "vulns_repo.py:get_stats_cvss_count", "message": "Docs with cvss_severities", "data": {"count": docs_with_cvss, "sample_id": sample_with_cvss.get("id") if sample_with_cvss else None, "sample_cvss": str(sample_with_cvss.get("database_specific", {}).get("cvss_severities", ""))[:300] if sample_with_cvss else None}, "timestamp": __import__("time").time() * 1000}) + "\n")
-    except Exception as e:
-        try:
-            with open("debug-6e8087.log", "a", encoding="utf-8") as f:
-                f.write(json.dumps({"hypothesisId": "A", "location": "vulns_repo.py:get_stats_cvss_count", "message": "Error", "data": {"error": str(e)}, "timestamp": __import__("time").time() * 1000}) + "\n")
-        except Exception:
-            pass
-    # #endregion
     pipeline = [
         {"$facet": {
             "severity": [
@@ -114,16 +100,6 @@ async def get_stats_aggregation(db: AsyncIOMotorDatabase) -> dict:
     if not results:
         return {"severity_distribution": [], "cvss_distribution": [], "by_year": [], "total": 0}
     facet = results[0]
-
-    # #region agent log
-    try:
-        import json
-        cvss_count = sum(b.get("count", 0) for b in facet.get("cvss", []) if b.get("_id") != "other")
-        with open("debug-6e8087.log", "a", encoding="utf-8") as f:
-            f.write(json.dumps({"hypothesisId": "A", "location": "vulns_repo.py:get_stats_aggregation", "message": "MongoDB stats facet", "data": {"cvss_buckets": facet.get("cvss", []), "cvss_total_docs": cvss_count, "severity_buckets": facet.get("severity", [])[:5], "total": facet.get("total", [{}])[0].get("value", 0)}, "timestamp": __import__("time").time() * 1000}) + "\n")
-    except Exception:
-        pass
-    # #endregion
 
     severity_order = ["CRITICAL", "HIGH", "MODERATE", "LOW"]
     severity_buckets = facet.get("severity", [])

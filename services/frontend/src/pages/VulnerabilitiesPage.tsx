@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Bar,
   BarChart,
@@ -20,12 +21,12 @@ import { SeverityBadge } from "@/components/ui/SeverityBadge";
 import { Pagination } from "@/components/ui/Pagination";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { StatCard } from "@/components/ui/StatCard";
-import { useVulnSearch, useVulnStats, useEcosystems } from "@/features/vulns/hooks";
+import { useVulnSearch, useVulnStats, useEcosystems, getVulnStatsQueryKey } from "@/features/vulns/hooks";
 import { VulnAdvancedSearchModal } from "@/features/vulns/VulnAdvancedSearchModal";
 import { normalizeSeverity, getCvssScore } from "@/lib/format";
 import { useAuth } from "@/hooks/useAuth";
 import type { Vulnerability } from "@/types";
-import type { VulnSearchParams } from "@/features/vulns/api";
+import { vulnsApi, type VulnSearchParams } from "@/features/vulns/api";
 
 const PAGE_SIZE = 25;
 const AGING_COLORS: Record<string, string> = {
@@ -34,15 +35,74 @@ const AGING_COLORS: Record<string, string> = {
   moderate: "#eab308",
   low: "#22c55e",
 };
+const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+type ScopeMode = "global" | "company";
+type HeatmapItem = { weekday: number; hour: number; count: number };
 
 function getCveId(v: Vulnerability): string {
   return v.aliases?.find((a) => a.toUpperCase().startsWith("CVE-")) ?? v.id;
 }
 
+function formatCompactNumber(value: number) {
+  return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
+function getHeatColor(value: number, max: number) {
+  if (max <= 0) return "rgba(71, 85, 105, 0.25)";
+  const intensity = value / max;
+  if (intensity > 0.8) return "rgba(239, 68, 68, 0.95)";
+  if (intensity > 0.6) return "rgba(245, 158, 11, 0.9)";
+  if (intensity > 0.4) return "rgba(56, 189, 248, 0.85)";
+  if (intensity > 0.2) return "rgba(59, 130, 246, 0.65)";
+  return "rgba(71, 85, 105, 0.4)";
+}
+
+function HeatmapGrid({ items }: { items: HeatmapItem[] }) {
+  const valueMap = useMemo(() => {
+    const map = new Map<string, number>();
+    items.forEach((item) => map.set(`${item.weekday}-${item.hour}`, item.count));
+    return map;
+  }, [items]);
+  const maxValue = useMemo(() => items.reduce((max, item) => (item.count > max ? item.count : max), 0), [items]);
+
+  return (
+    <div className="overflow-x-auto">
+      <div className="grid gap-1 min-w-[920px]" style={{ gridTemplateColumns: "70px repeat(24, minmax(30px, 1fr))" }}>
+        <div />
+        {Array.from({ length: 24 }).map((_, hour) => (
+          <div key={`h-${hour}`} className="text-[10px] text-slate-400 text-center">
+            {String(hour).padStart(2, "0")}
+          </div>
+        ))}
+        {weekdays.map((day, dayIndex) => (
+          <div key={day} className="contents">
+            <div className="text-xs text-slate-300 pr-2 self-center">{day}</div>
+            {Array.from({ length: 24 }).map((_, hour) => {
+              const value = valueMap.get(`${dayIndex}-${hour}`) ?? 0;
+              return (
+                <div
+                  key={`${dayIndex}-${hour}`}
+                  className="h-5 rounded-sm border border-slate-800/60"
+                  style={{ backgroundColor: getHeatColor(value, maxValue) }}
+                  title={`${day} ${String(hour).padStart(2, "0")}:00 - ${value}`}
+                />
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function VulnerabilitiesPage() {
+  const queryClient = useQueryClient();
   const { session } = useAuth();
   const companyId = session?.user?.company_id;
   const [query, setQuery] = useState("");
+  const [scopeMode, setScopeMode] = useState<ScopeMode>("global");
+  const [cvssRecentOnly, setCvssRecentOnly] = useState(false);
   const [filters, setFilters] = useState<
     Omit<VulnSearchParams, "skip" | "limit" | "sort_by" | "sort_order">
   >({});
@@ -58,13 +118,69 @@ export function VulnerabilitiesPage() {
     sort_by: sortBy,
     sort_order: sortOrder,
   };
+  const last30dIso = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().slice(0, 10);
+  }, []);
+  const globalStatsParams = useMemo(
+    () => ({ ...filters, chart_scope: "global" as const }),
+    [filters]
+  );
+  const companyStatsParams = useMemo(
+    () => ({ ...filters, chart_scope: "company" as const, company_id: companyId }),
+    [filters, companyId]
+  );
+  const globalCvssParams = useMemo(
+    () => ({
+      ...filters,
+      chart_scope: "global" as const,
+      ...(cvssRecentOnly ? { published_from: last30dIso } : {}),
+    }),
+    [filters, cvssRecentOnly, last30dIso]
+  );
+
+  useEffect(() => {
+    queryClient.prefetchQuery({
+      queryKey: getVulnStatsQueryKey(globalStatsParams),
+      queryFn: () => vulnsApi.getStats(globalStatsParams),
+      staleTime: 5 * 60 * 1000,
+    });
+    queryClient.prefetchQuery({
+      queryKey: getVulnStatsQueryKey(companyStatsParams),
+      queryFn: () => vulnsApi.getStats(companyStatsParams),
+      staleTime: 5 * 60 * 1000,
+    });
+    queryClient.prefetchQuery({
+      queryKey: getVulnStatsQueryKey(globalCvssParams),
+      queryFn: () => vulnsApi.getStats(globalCvssParams),
+      staleTime: 5 * 60 * 1000,
+    });
+  }, [queryClient, globalStatsParams, companyStatsParams, globalCvssParams]);
 
   const { data: searchResult, isLoading, error } = useVulnSearch(searchParams);
-  const { data: stats, isLoading: statsLoading } = useVulnStats({ all: true, company_id: companyId });
+  const { data: kpiStats, isLoading: statsLoading } = useVulnStats({ all: true, company_id: companyId });
+  const { data: globalChartStats, isLoading: globalChartLoading } = useVulnStats(globalStatsParams);
+  const { data: globalCvssStats, isLoading: cvssChartLoading } = useVulnStats(globalCvssParams);
+  const { data: companyChartStats, isLoading: companyChartLoading } = useVulnStats(companyStatsParams);
   const { data: ecosystems = [] } = useEcosystems();
 
   const vulnerabilities = searchResult?.items ?? [];
   const total = searchResult?.total ?? 0;
+  const topAssetsBars = scopeMode === "company"
+    ? (companyChartStats?.charts.top_assets_open_cves ?? [])
+    : (globalChartStats?.charts.top_assets_open_cves ?? []);
+  const agingBars = scopeMode === "company"
+    ? (companyChartStats?.charts.aging_by_severity ?? [])
+    : (globalChartStats?.charts.aging_by_severity ?? []);
+  const scatterPoints = scopeMode === "company"
+    ? (companyChartStats?.charts.criticality_vs_exploitability ?? [])
+    : (globalChartStats?.charts.criticality_vs_exploitability ?? []);
+  const heatmapItems = scopeMode === "company"
+    ? (companyChartStats?.charts.heatmap ?? [])
+    : (globalChartStats?.charts.heatmap ?? []);
+  const isScopeLoading = scopeMode === "company" ? companyChartLoading : globalChartLoading;
+  const cvssDistribution = globalCvssStats?.cvss_distribution ?? [];
 
   const columns = useMemo<Array<ColumnDef<Vulnerability>>>(
     () => [
@@ -155,10 +271,7 @@ export function VulnerabilitiesPage() {
     setPage(1);
   }
 
-  const kpis = stats?.kpis;
-  const topAssetsBars = stats?.charts.top_assets_open_cves ?? [];
-  const agingBars = stats?.charts.aging_by_severity ?? [];
-  const scatterPoints = stats?.charts.criticality_vs_exploitability ?? [];
+  const kpis = kpiStats?.kpis;
 
   const chartTooltipStyle = {
     backgroundColor: "#1e293b",
@@ -214,15 +327,33 @@ export function VulnerabilitiesPage() {
               Top Vulnerable Assets
             </Tooltip>
           }
+          rightSlot={
+            <div className="inline-flex rounded border border-slate-700/70 overflow-hidden text-[11px]">
+              <button
+                type="button"
+                onClick={() => setScopeMode("global")}
+                className={`px-2 py-1 ${scopeMode === "global" ? "bg-tactical-sky/20 text-tactical-sky" : "text-slate-400 hover:bg-slate-800/60"}`}
+              >
+                G
+              </button>
+              <button
+                type="button"
+                onClick={() => setScopeMode("company")}
+                className={`px-2 py-1 border-l border-slate-700/70 ${scopeMode === "company" ? "bg-tactical-amber/20 text-tactical-amber" : "text-slate-400 hover:bg-slate-800/60"}`}
+              >
+                C
+              </button>
+            </div>
+          }
         >
           <div className="h-[260px]">
-            {statsLoading ? (
+            {isScopeLoading ? (
               <div className="h-full animate-pulse rounded bg-slate-800/50" />
             ) : topAssetsBars.length ? (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={topAssetsBars} layout="vertical" margin={{ left: 0, right: 10, top: 8, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis type="number" stroke="#94a3b8" />
+                  <XAxis type="number" stroke="#94a3b8" tickFormatter={formatCompactNumber} />
                   <YAxis
                     type="category"
                     dataKey="asset"
@@ -236,7 +367,9 @@ export function VulnerabilitiesPage() {
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <p className="text-slate-400">No company-scoped asset/CVE matches yet.</p>
+              <p className="text-slate-400">
+                {scopeMode === "company" ? "No company-scoped asset/CVE matches yet." : "No global matches for current filters."}
+              </p>
             )}
           </div>
         </SectionCard>
@@ -249,7 +382,7 @@ export function VulnerabilitiesPage() {
           }
         >
           <div className="h-[260px]">
-            {statsLoading ? (
+            {isScopeLoading ? (
               <div className="h-full animate-pulse rounded bg-slate-800/50" />
             ) : agingBars.length ? (
               <ResponsiveContainer width="100%" height="100%">
@@ -273,6 +406,39 @@ export function VulnerabilitiesPage() {
       </div>
 
       <SectionCard
+        title="Vulnerability Distribution by CVSS"
+        rightSlot={
+          <label className="inline-flex items-center gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              checked={cvssRecentOnly}
+              onChange={(e) => setCvssRecentOnly(e.target.checked)}
+              className="accent-tactical-sky"
+            />
+            Last 30 days only
+          </label>
+        }
+      >
+        <div className="h-[260px]">
+          {cvssChartLoading ? (
+            <div className="h-full animate-pulse rounded bg-slate-800/50" />
+          ) : cvssDistribution.some((item) => item.value > 0) ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={cvssDistribution}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                <XAxis dataKey="range" stroke="#94a3b8" />
+                <YAxis stroke="#94a3b8" tickFormatter={formatCompactNumber} />
+                <RechartsTooltip contentStyle={chartTooltipStyle} formatter={(v: number) => [v.toLocaleString(), "Vulnerabilities"]} />
+                <Bar dataKey="value" fill="#38BDF8" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <p className="text-slate-400">No CVSS data in current filtered dataset.</p>
+          )}
+        </div>
+      </SectionCard>
+
+      <SectionCard
         title={
           <Tooltip content="X: CVSS score, Y: EPSS percentage. Upper-right points are highest priority">
             Criticality vs Exploitability
@@ -280,7 +446,7 @@ export function VulnerabilitiesPage() {
         }
       >
         <div className="h-[320px]">
-          {statsLoading ? (
+          {isScopeLoading ? (
             <div className="h-full animate-pulse rounded bg-slate-800/50" />
           ) : scatterPoints.length ? (
             <ResponsiveContainer width="100%" height="100%">
@@ -306,15 +472,19 @@ export function VulnerabilitiesPage() {
                   contentStyle={chartTooltipStyle}
                   formatter={(value: number, key: string) => {
                     if (key === "epss") return [`${(value * 100).toFixed(2)}%`, "EPSS"];
+                    if (key === "count") return [value.toLocaleString(), "Vulnerabilities"];
                     return [value.toFixed(2), key.toUpperCase()];
                   }}
-                  labelFormatter={(_, payload) => payload?.[0]?.payload?.id ?? "CVE"}
+                  labelFormatter={(_, payload) => {
+                    const id = payload?.[0]?.payload?.id;
+                    return scopeMode === "global" ? `CVSS/EPSS bucket ${id ?? ""}`.trim() : (id ?? "CVE");
+                  }}
                 />
                 <Scatter data={scatterPoints} fill="#38BDF8" />
               </ScatterChart>
             </ResponsiveContainer>
           ) : (
-            <p className="text-slate-400">No CVSS+EPSS data for open company vulnerabilities.</p>
+            <p className="text-slate-400">No CVSS+EPSS data for selected scope.</p>
           )}
         </div>
       </SectionCard>
@@ -355,6 +525,22 @@ export function VulnerabilitiesPage() {
         {error ? (
           <p className="mt-3 text-sm text-red-300">{(error as Error).message}</p>
         ) : null}
+      </SectionCard>
+
+      <SectionCard
+        title={
+          <Tooltip content="Heatmap of new vulnerability appearance over weekday/hour from Elasticsearch published timestamps.">
+            New Vulnerability Activity Heatmap
+          </Tooltip>
+        }
+      >
+        {isScopeLoading ? (
+          <p className="text-slate-400">Loading...</p>
+        ) : heatmapItems.length ? (
+          <HeatmapGrid items={heatmapItems} />
+        ) : (
+          <p className="text-slate-400">No heatmap data available for selected scope.</p>
+        )}
       </SectionCard>
 
       {/* Table */}

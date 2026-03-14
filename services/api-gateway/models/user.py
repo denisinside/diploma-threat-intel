@@ -2,6 +2,7 @@ from pydantic import EmailStr, Field
 from models.DBModel import DBModel
 from models.enums import Role
 from typing import Optional
+
 from datetime import datetime
 
 class Company(DBModel):
@@ -15,9 +16,9 @@ class Company(DBModel):
 
 class User(DBModel):
     """
-    System user belonging to a specific company.
+    System user. Super_admin has no company_id; others belong to a company.
     """
-    company_id: str = Field(...)
+    company_id: Optional[str] = None
     email: EmailStr
     full_name: str = Field(..., min_length=2, max_length=100)
     password_hash: str = Field(exclude=True)

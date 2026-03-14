@@ -9,15 +9,18 @@ import {
   Ticket,
   Bell,
   Settings,
+  Users,
+  Building2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
+import { useIsAdmin, useIsSuperAdmin } from "@/hooks/useRoleGuard";
 import { leaksApi } from "@/features/leaks/api";
 import { getLeakAnalyticsQueryKey } from "@/features/leaks/hooks";
 import { vulnsApi } from "@/features/vulns/api";
 import { getVulnStatsQueryKey } from "@/features/vulns/hooks";
 
-const navItems = [
+const baseNavItems = [
   { to: "/overview", icon: LayoutDashboard, label: "OVERVIEW" },
   { to: "/assets", icon: Server, label: "ASSETS" },
   { to: "/leaks", icon: ShieldAlert, label: "LEAKS" },
@@ -31,6 +34,14 @@ export function Sidebar() {
   const queryClient = useQueryClient();
   const { session } = useAuth();
   const companyId = session?.user?.company_id;
+  const isSuperAdmin = useIsSuperAdmin();
+  const isCompanyAdmin = useIsAdmin();
+
+  const navItems = [
+    ...baseNavItems,
+    ...(isCompanyAdmin ? [{ to: "/team", icon: Users, label: "TEAM" }] : []),
+    ...(isSuperAdmin ? [{ to: "/admin/company-requests", icon: Building2, label: "COMPANY REQUESTS" }] : []),
+  ];
 
   const prefetchByRoute = useCallback(
     (to: string) => {
@@ -56,7 +67,7 @@ export function Sidebar() {
   );
 
   return (
-    <aside className="w-56 flex-shrink-0 glass-panel border-r border-slate-700/50 flex flex-col">
+    <aside className="w-56 flex-shrink-0 glass-panel rounded-none border-r border-slate-700/50 flex flex-col">
       <div className="p-4 border-b border-slate-700/50">
         <h1 className="text-xs font-semibold text-tactical-sky tracking-[0.2em]">
           C.L.E.A.R.

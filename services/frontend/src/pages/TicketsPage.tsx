@@ -8,7 +8,7 @@ import { useCreateTicket, useTicketCount, useTickets, useUpdateTicket } from "@/
 import { useAssets } from "@/features/assets/hooks";
 import { useVulnSearch } from "@/features/vulns/hooks";
 import { useAuth } from "@/hooks/useAuth";
-import { useCanMutate } from "@/hooks/useRoleGuard";
+import { useCanManageTickets } from "@/hooks/useRoleGuard";
 import { formatDate } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import type { Ticket, TicketStatus } from "@/types";
@@ -29,7 +29,7 @@ function getCveId(v: { aliases?: string[]; id?: string }): string {
 export function TicketsPage() {
   const { session } = useAuth();
   const companyId = session?.user?.company_id;
-  const canMutate = useCanMutate();
+  const canManageTickets = useCanManageTickets();
   const [status, setStatus] = useState<TicketStatus | "all">("all");
   const [assetId, setAssetId] = useState("");
   const [vulnerabilityId, setVulnerabilityId] = useState("");
@@ -83,7 +83,7 @@ export function TicketsPage() {
       {
         header: "Actions",
         cell: ({ row }) =>
-          canMutate ? (
+          canManageTickets ? (
             <div className="flex gap-2">
               {row.original.status !== "resolved" ? (
                 <button
@@ -105,7 +105,7 @@ export function TicketsPage() {
           ),
       },
     ],
-    [updateTicket, assets, canMutate]
+    [updateTicket, assets, canManageTickets]
   );
 
   const handleCreateTicket = (e: React.FormEvent) => {
@@ -164,7 +164,7 @@ export function TicketsPage() {
           </select>
         }
       >
-        {companyId && canMutate ? (
+        {companyId && canManageTickets ? (
           <form
             className="mb-4 grid grid-cols-1 md:grid-cols-4 gap-2"
             onSubmit={handleCreateTicket}
@@ -249,8 +249,8 @@ export function TicketsPage() {
         ) : null}
         {ticketError ? <p className="mb-2 text-sm text-red-300">{ticketError}</p> : null}
         {error ? <p className="text-sm text-red-300">{(error as Error).message}</p> : null}
-        {!canMutate && companyId ? (
-          <p className="mb-2 text-sm text-slate-400">Viewer role: you cannot create or update tickets.</p>
+        {!canManageTickets && companyId ? (
+          <p className="mb-2 text-sm text-slate-400">View-only: you cannot create or update tickets.</p>
         ) : null}
         {isLoading ? (
           <p className="text-slate-400">Loading...</p>

@@ -50,7 +50,24 @@ def run_consumer() -> None:
         try:
             payload = json.loads(body.decode("utf-8"))
             event = NotificationEvent.model_validate(payload)
+            # #region agent log
+            try:
+                import os
+                _lp = os.path.join(os.path.dirname(__file__), "..", "..", "..", "debug-09ba45.log")
+                with open(_lp, "a", encoding="utf-8") as _f:
+                    _f.write(json.dumps({"hypothesisId":"A","location":"consumer.py:on_message","message":"event received","data":{"event_type":event.event_type.value,"event_id":event.event_id,"routing_key":getattr(method,"routing_key",None),"vuln_id":event.data.get("vuln_id") if event.event_type.value=="vuln.detected" else None,"affected_packages":event.data.get("affected_packages",[])[:5] if event.event_type.value=="vuln.detected" else None},"timestamp":int(__import__("time").time()*1000)}) + "\n")
+            except Exception:
+                pass
+            # #endregion
             if _is_processed(db, event.event_id):
+                # #region agent log
+                try:
+                    _lp = os.path.join(os.path.dirname(__file__), "..", "..", "..", "debug-09ba45.log")
+                    with open(_lp, "a", encoding="utf-8") as _f:
+                        _f.write(json.dumps({"hypothesisId":"E","location":"consumer.py:on_message","message":"event already processed, skipping","data":{"event_id":event.event_id,"event_type":event.event_type.value},"timestamp":int(__import__("time").time()*1000)}) + "\n")
+                except Exception:
+                    pass
+                # #endregion
                 ch.basic_ack(delivery_tag=method.delivery_tag)
                 return
             delivered = dispatch_event(db, event)
@@ -85,6 +102,15 @@ def run_consumer() -> None:
 
     channel.basic_consume(queue=settings.RABBITMQ_QUEUE, on_message_callback=on_message)
     logger.info("notification-service is waiting for events")
+    # #region agent log
+    try:
+        import os
+        _lp = os.path.join(os.path.dirname(__file__), "..", "..", "..", "debug-09ba45.log")
+        with open(_lp, "a", encoding="utf-8") as _f:
+            _f.write(json.dumps({"hypothesisId":"A","location":"consumer.py:run_consumer","message":"consumer started, waiting for events","data":{"queue":settings.RABBITMQ_QUEUE,"exchange":settings.RABBITMQ_EXCHANGE},"timestamp":int(__import__("time").time()*1000)}) + "\n")
+    except Exception:
+        pass
+    # #endregion
     try:
         channel.start_consuming()
     finally:

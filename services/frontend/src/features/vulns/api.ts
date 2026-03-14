@@ -25,6 +25,7 @@ export type VulnStatsParams = Omit<
 > & {
   all?: boolean;
   company_id?: string;
+  chart_scope?: "company" | "global";
 };
 
 export type VulnStats = {
@@ -54,6 +55,12 @@ export type VulnStats = {
       cvss: number;
       epss: number;
       severity: string;
+      count?: number;
+    }>;
+    heatmap: Array<{
+      weekday: number;
+      hour: number;
+      count: number;
     }>;
   };
 };
@@ -82,6 +89,7 @@ export const vulnsApi = {
     const search = new URLSearchParams();
     if (params.all) search.set("all", "true");
     if (params.company_id) search.set("company_id", params.company_id);
+    if (params.chart_scope) search.set("chart_scope", params.chart_scope);
     if (params.q) search.set("q", params.q);
     if (params.ecosystem) search.set("ecosystem", params.ecosystem);
     if (params.package) search.set("package", params.package);

@@ -117,8 +117,16 @@ export function SubscriptionsPage() {
 
   const channelColumns = useMemo<Array<ColumnDef<NotificationChannel>>>(
     () => [
-      { header: "Name", accessorKey: "name" },
-      { header: "Type", accessorKey: "channel_type" },
+      {
+        header: "Name",
+        accessorFn: (row) => row.name ?? (row as Record<string, unknown>).channel_name ?? "",
+        cell: ({ getValue }) => <span>{(getValue() as string) || "—"}</span>,
+      },
+      {
+        header: "Type",
+        accessorFn: (row) => row.channel_type ?? "",
+        cell: ({ getValue }) => <span>{(getValue() as string) || "—"}</span>,
+      },
       {
         header: "Enabled",
         cell: ({ row }) =>
@@ -178,18 +186,19 @@ export function SubscriptionsPage() {
   );
 
   function renderMaskedConfig(channel: NotificationChannel): string {
-    const config = channel.config as Record<string, unknown>;
-    if (channel.channel_type === "telegram") {
+    const config = (channel.config ?? {}) as Record<string, unknown>;
+    const channelType = channel.channel_type;
+    if (channelType === "telegram") {
       return JSON.stringify({
         chat_id: config.chat_id,
         bot_token: "***",
       });
     }
-    if (channel.channel_type === "slack" || channel.channel_type === "discord" || channel.channel_type === "webhook") {
-      const key = channel.channel_type === "webhook" ? "url" : "webhook_url";
+    if (channelType === "slack" || channelType === "discord" || channelType === "webhook") {
+      const key = channelType === "webhook" ? "url" : "webhook_url";
       return JSON.stringify({ [key]: "***" });
     }
-    if (channel.channel_type === "signal") {
+    if (channelType === "signal") {
       return JSON.stringify({
         base_url: config.base_url,
         number: config.number ? "***" : undefined,
@@ -483,9 +492,6 @@ export function SubscriptionsPage() {
         ) : null}
 
         {uiError ? <p className="mb-2 text-sm text-red-300">{uiError}</p> : null}
-        {!canMutate && companyId ? (
-          <p className="mb-2 text-sm text-slate-400">Viewer role: you cannot create, edit, or delete.</p>
-        ) : null}
         {tab === "subscriptions" && canMutate && selectedSubs.length > 0 ? (
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <span className="text-sm text-slate-400">{selectedSubs.length} selected</span>
@@ -538,6 +544,7 @@ export function SubscriptionsPage() {
         ) : null}
         {tab === "subscriptions" ? (
           <DataTable
+            key="subscriptions"
             data={subscriptions}
             columns={subColumns}
             emptyText="No subscription rules."
@@ -548,7 +555,13 @@ export function SubscriptionsPage() {
             pageSize={100}
           />
         ) : (
-          <DataTable data={channels} columns={channelColumns} emptyText="No channels configured." />
+          <DataTable
+            key="channels"
+            data={channels}
+            columns={channelColumns}
+            emptyText="No channels configured."
+            getRowId={(row) => row._id}
+          />
         )}
       </SectionCard>
 

@@ -1,13 +1,8 @@
 import { SectionCard } from "@/components/ui/SectionCard";
-import { useScanStatus, useTriggerScan } from "@/features/tasks/hooks";
 import { useAuth } from "@/hooks/useAuth";
-import { useCanMutate } from "@/hooks/useRoleGuard";
 
 export function SettingsPage() {
   const { session, logout } = useAuth();
-  const canMutate = useCanMutate();
-  const { data: scanStatus } = useScanStatus();
-  const triggerScan = useTriggerScan();
 
   return (
     <div className="space-y-6">
@@ -34,24 +29,6 @@ export function SettingsPage() {
         >
           Sign out
         </button>
-      </SectionCard>
-
-      <SectionCard title="CVE Scanner">
-        <p className="text-sm text-slate-400">
-          Status: <span className="text-slate-100">{scanStatus?.status ?? "unknown"}</span>
-        </p>
-        <p className="text-sm text-slate-500 mt-1">{scanStatus?.message ?? "No status yet"}</p>
-        {canMutate ? (
-          <button
-            type="button"
-            onClick={() => triggerScan.mutate()}
-            className="mt-4 px-4 py-2 rounded border border-tactical-amber/40 text-tactical-amber hover:bg-tactical-amber/15"
-          >
-            {triggerScan.isPending ? "Triggering..." : "Trigger scan"}
-          </button>
-        ) : (
-          <p className="mt-4 text-sm text-slate-500">Viewer role: cannot trigger scans.</p>
-        )}
       </SectionCard>
     </div>
   );
