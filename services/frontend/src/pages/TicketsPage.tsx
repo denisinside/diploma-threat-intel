@@ -1,11 +1,15 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { useQueries } from "@tanstack/react-query";
 import type { ColumnDef } from "@tanstack/react-table";
+import { ChevronDown } from "lucide-react";
 import { DataTable } from "@/components/ui/DataTable";
 import { SectionCard } from "@/components/ui/SectionCard";
 import { SeverityBadge } from "@/components/ui/SeverityBadge";
 import { StatCard } from "@/components/ui/StatCard";
 import { useCreateTicket, useTicketCount, useTickets, useUpdateTicket } from "@/features/tickets/hooks";
 import { useAssets } from "@/features/assets/hooks";
+import { vulnsApi } from "@/features/vulns/api";
 import { useVulnSearch } from "@/features/vulns/hooks";
 import { useAuth } from "@/hooks/useAuth";
 import { useCanManageTickets } from "@/hooks/useRoleGuard";
@@ -15,6 +19,14 @@ import type { Ticket, TicketStatus } from "@/types";
 
 const statusOptions: Array<TicketStatus | "all"> = [
   "all",
+  "open",
+  "in_progress",
+  "resolved",
+  "ignored",
+  "false_positive",
+];
+
+const statusChangeOptions: TicketStatus[] = [
   "open",
   "in_progress",
   "resolved",
@@ -54,11 +66,43 @@ export function TicketsPage() {
   const { data: inProgressCount } = useTicketCount(companyId, "in_progress");
   const { data: resolvedCount } = useTicketCount(companyId, "resolved");
 
+  const uniqueVulnIds = useMemo(
+    () => [...new Set(tickets.map((t) => t.vulnerability_id).filter(Boolean))],
+    [tickets]
+  );
+  const vulnQueries = useQueries({
+    queries: uniqueVulnIds.map((id) => ({
+      queryKey: ["vulns", id],
+      queryFn: () => vulnsApi.getById(id),
+      staleTime: 5 * 60 * 1000,
+    })),
+  });
+  const vulnIdToCve = useMemo(() => {
+    const map = new Map<string, string>();
+    vulnQueries.forEach((q, i) => {
+      const id = uniqueVulnIds[i];
+      if (!id) return;
+      const vuln = q.data;
+      if (vuln) {
+        const cve = getCveId(vuln);
+        map.set(id, cve || id);
+      } else {
+        map.set(id, id);
+      }
+    });
+    return map;
+  }, [vulnQueries, uniqueVulnIds]);
+
   const columns = useMemo<Array<ColumnDef<Ticket>>>(
     () => [
       { header: "Ticket ID", accessorKey: "_id", cell: ({ row }) => <span className="font-mono text-xs">{String(row.original._id).slice(-8)}</span> },
       {
         header: "Asset",
+        id: "asset",
+        accessorFn: (row) => {
+          const a = assets.find((x) => x._id === row.asset_id);
+          return a ? `${a.name}${a.version ? ` ${a.version}` : ""}` : row.asset_id;
+        },
         cell: ({ row }) => {
           const aid = row.original.asset_id;
           const asset = assets.find((a) => a._id === aid);
@@ -67,45 +111,64 @@ export function TicketsPage() {
       },
       {
         header: "Vulnerability",
-        cell: ({ row }) => (
-          <span className="font-mono text-sm">{row.original.vulnerability_id}</span>
-        ),
+        id: "vulnerability",
+        accessorKey: "vulnerability_id",
+        cell: ({ row }) => {
+          const vid = row.original.vulnerability_id;
+          const display = vulnIdToCve.get(vid) ?? vid;
+          return (
+            <Link
+              to={`/vulnerabilities/${encodeURIComponent(display)}`}
+              className="font-mono text-sm text-tactical-sky hover:underline"
+            >
+              {display}
+            </Link>
+          );
+        },
       },
       {
         header: "Priority",
+        accessorKey: "priority",
         cell: ({ row }) => <SeverityBadge severity={row.original.priority} />,
       },
       { header: "Status", accessorKey: "status" },
       {
         header: "Detected",
+        accessorKey: "detected_at",
         cell: ({ row }) => formatDate(row.original.detected_at),
       },
       {
         header: "Actions",
+        id: "actions",
+        enableSorting: false,
         cell: ({ row }) =>
           canManageTickets ? (
-            <div className="flex gap-2">
-              {row.original.status !== "resolved" ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    updateTicket.mutate({
-                      ticketId: row.original._id,
-                      payload: { status: "resolved" },
-                    })
-                  }
-                  className="text-xs text-emerald-300 hover:text-emerald-200"
-                >
-                  mark resolved
-                </button>
-              ) : null}
+            <div className="relative group">
+              <select
+                value={row.original.status}
+                onChange={(e) => {
+                  const newStatus = e.target.value as TicketStatus;
+                  updateTicket.mutate({
+                    ticketId: row.original._id,
+                    payload: { status: newStatus },
+                  });
+                }}
+                className="appearance-none bg-slate-800/60 border border-slate-600 rounded px-2 py-1 pr-6 text-xs cursor-pointer hover:border-slate-500"
+              >
+                {statusChangeOptions.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt.replace("_", " ")}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="absolute right-1 top-1/2 -translate-y-1/2 w-3 h-3 pointer-events-none text-slate-400" />
             </div>
           ) : (
             <span className="text-slate-500 text-xs">—</span>
           ),
       },
     ],
-    [updateTicket, assets, canManageTickets]
+    [updateTicket, assets, canManageTickets, vulnIdToCve]
   );
 
   const handleCreateTicket = (e: React.FormEvent) => {
